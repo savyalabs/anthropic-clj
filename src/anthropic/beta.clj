@@ -157,6 +157,10 @@
                                              VaultUpdateParams
                                              VaultUpdateParams$Metadata)
            (com.anthropic.models.beta.userprofiles BetaUserProfile
+                                                   BetaUserProfileExternalUserDetails
+                                                   BetaUserProfileExternalUserDetailsParams
+                                                   BetaUserProfileExternalUserDetailsParams$AccountStatus
+                                                   BetaUserProfileExternalUserDetailsParams$EntityType
                                                    BetaUserProfileEnrollmentUrl
                                                    UserProfileCreateEnrollmentUrlParams
                                                    UserProfileCreateParams
@@ -3856,11 +3860,35 @@
       (.putAdditionalProperty b ^String k (JsonValue/from v)))
     (.build b)))
 
+(defn- ->user-profile-external-user-details ^BetaUserProfileExternalUserDetailsParams
+  [{:keys [account-status country email-hash entity-type name-hash onboarded-at reference-id]}]
+  (let [b (BetaUserProfileExternalUserDetailsParams/builder)]
+    (when account-status
+      (.accountStatus b ^BetaUserProfileExternalUserDetailsParams$AccountStatus
+                      (->enum-value account-status #{:active :suspended :blocked}
+                                    (fn [s#] (BetaUserProfileExternalUserDetailsParams$AccountStatus/of s#))
+                                    :account-status)))
+    (when country (.country b ^String country))
+    (when email-hash (.emailHash b ^String email-hash))
+    (when entity-type
+      (.entityType b ^BetaUserProfileExternalUserDetailsParams$EntityType
+                   (->enum-value entity-type #{:individual :business :non-profit :government}
+                                 (fn [s#]
+                                   (BetaUserProfileExternalUserDetailsParams$EntityType/of
+                                    (str/replace s# "-" "_")))
+                                 :entity-type)))
+    (when name-hash (.nameHash b ^String name-hash))
+    (when onboarded-at (.onboardedAt b (->offset-date-time onboarded-at)))
+    (when reference-id (.referenceId b ^String reference-id))
+    (.build b)))
+
 (defn- ->user-profile-create-params ^UserProfileCreateParams
-  [{:keys [name external-id external-user-onboarded-at metadata access-type]}]
+  [{:keys [name external-id external-user-details external-user-onboarded-at metadata access-type]}]
   (let [b (UserProfileCreateParams/builder)]
     (when name (.name b ^String name))
     (when external-id (.externalId b ^String external-id))
+    (when external-user-details
+      (.externalUserDetails b (->user-profile-external-user-details external-user-details)))
     (when external-user-onboarded-at (.externalUserOnboardedAt b (->offset-date-time external-user-onboarded-at)))
     (when metadata (.metadata b (->user-profile-create-metadata metadata)))
     (when access-type (.accessType b ^UserProfileCreateParams$AccessType
@@ -3869,11 +3897,13 @@
     (.build b)))
 
 (defn- ->user-profile-update-params ^UserProfileUpdateParams
-  [user-profile-id {:keys [name external-id external-user-onboarded-at metadata access-type]}]
+  [user-profile-id {:keys [name external-id external-user-details external-user-onboarded-at metadata access-type]}]
   (let [b (UserProfileUpdateParams/builder)]
     (.userProfileId b ^String user-profile-id)
     (when name (.name b ^String name))
     (when external-id (.externalId b ^String external-id))
+    (when external-user-details
+      (.externalUserDetails b (->user-profile-external-user-details external-user-details)))
     (when external-user-onboarded-at (.externalUserOnboardedAt b (->offset-date-time external-user-onboarded-at)))
     (when metadata (.metadata b (->user-profile-update-metadata metadata)))
     (when access-type (.accessType b ^UserProfileUpdateParams$AccessType
@@ -3887,6 +3917,24 @@
     (.userProfileId b ^String user-profile-id)
     (.build b)))
 
+(defn- external-user-details->map [^BetaUserProfileExternalUserDetails details]
+  (cond-> {}
+    (unopt (.accountStatus details))
+    (assoc :account-status
+           (->keyword
+            (.asString ^com.anthropic.models.beta.userprofiles.BetaUserProfileExternalUserDetails$AccountStatus
+                       (unopt (.accountStatus details)))))
+    (unopt (.country details)) (assoc :country (unopt (.country details)))
+    (unopt (.emailHash details)) (assoc :email-hash (unopt (.emailHash details)))
+    (unopt (.entityType details))
+    (assoc :entity-type
+           (->keyword
+            (.asString ^com.anthropic.models.beta.userprofiles.BetaUserProfileExternalUserDetails$EntityType
+                       (unopt (.entityType details)))))
+    (unopt (.nameHash details)) (assoc :name-hash (unopt (.nameHash details)))
+    (unopt (.onboardedAt details)) (assoc :onboarded-at (str (unopt (.onboardedAt details))))
+    (unopt (.referenceId details)) (assoc :reference-id (unopt (.referenceId details)))))
+
 (defn- user-profile->map [^BetaUserProfile r]
   (cond-> {:id (.id r)
            :created-at (str (.createdAt r))
@@ -3895,6 +3943,9 @@
            :type (keyword (.asString (.type r)))}
     (unopt (.name r)) (assoc :name (unopt (.name r)))
     (unopt (.externalId r)) (assoc :external-id (unopt (.externalId r)))
+    (unopt (.externalUserDetails r))
+    (assoc :external-user-details
+           (external-user-details->map (unopt (.externalUserDetails r))))
     (unopt (.externalUserOnboardedAt r)) (assoc :external-user-onboarded-at (str (unopt (.externalUserOnboardedAt r))))
     (unopt (.accessType r)) (assoc :access-type (->keyword (.asString ^com.anthropic.models.beta.userprofiles.BetaUserProfile$AccessType (unopt (.accessType r)))))
     (.trustGrants r) (assoc :trust-grants
@@ -3909,7 +3960,8 @@
 (defn create-user-profile
   "Create a user profile with optional `:name`, `:external-id`, `:metadata`,
   `:access-type` (`:application` or `:passthrough`), and optional
-  `:external-user-onboarded-at`. Returns the profile map."
+  `:external-user-details` and `:external-user-onboarded-at`. Returns the
+  profile map."
   [^AnthropicClient client req]
   (with-api-errors
     (user-profile->map (-> (.beta client) (.userProfiles)
@@ -3932,8 +3984,8 @@
 
 (defn update-user-profile
   "Update a user profile's `:name`, `:external-id`, `:metadata`,
-  `:access-type` (`:application` or `:passthrough`), or
-  `:external-user-onboarded-at`."
+  `:access-type` (`:application` or `:passthrough`),
+  `:external-user-details`, or `:external-user-onboarded-at`."
   [^AnthropicClient client ^String user-profile-id changes]
   (with-api-errors
     (user-profile->map (-> (.beta client) (.userProfiles)

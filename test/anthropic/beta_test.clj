@@ -1230,19 +1230,43 @@
   (let [^UserProfileCreateParams p (->user-profile-create-params
                                     {:name "Ada" :external-id "ada-1" :metadata {:team "x"}
                                      :external-user-onboarded-at "2026-07-04T00:00:00Z"
+                                     :external-user-details
+                                     {:account-status :active
+                                      :country "US"
+                                      :email-hash "email-sha256"
+                                      :entity-type :individual
+                                      :name-hash "name-sha256"
+                                      :onboarded-at "2026-07-03T00:00:00Z"
+                                      :reference-id "customer-1"}
                                      :access-type :application})]
     (is (= "Ada" (opt (.name p))))
     (is (= "ada-1" (opt (.externalId p))))
     (is (= "2026-07-04T00:00Z" (str (opt (.externalUserOnboardedAt p)))))
-    (is (= "application" (some-> (.accessType p) opt .asString))))
+    (is (= "application" (some-> (.accessType p) opt .asString)))
+    (let [details (opt (.externalUserDetails p))]
+      (is (= "active" (some-> details .accountStatus opt .asString)))
+      (is (= "US" (some-> details .country opt)))
+      (is (= "email-sha256" (some-> details .emailHash opt)))
+      (is (= "individual" (some-> details .entityType opt .asString)))
+      (is (= "name-sha256" (some-> details .nameHash opt)))
+      (is (= "2026-07-03T00:00Z" (some-> details .onboardedAt opt str)))
+      (is (= "customer-1" (some-> details .referenceId opt)))))
   (let [^UserProfileUpdateParams p (->user-profile-update-params "up_1"
                                                                   {:name "Ada L"
                                                                    :external-user-onboarded-at "2026-07-05T00:00:00Z"
+                                                                   :external-user-details
+                                                                   {:account-status :suspended
+                                                                    :entity-type :non-profit
+                                                                    :reference-id "customer-2"}
                                                                    :access-type :passthrough})]
     (is (= "up_1" (opt (.userProfileId p))))
     (is (= "Ada L" (opt (.name p))))
     (is (= "2026-07-05T00:00Z" (str (opt (.externalUserOnboardedAt p)))))
-    (is (= "passthrough" (.asString (opt (.accessType p))))))
+    (is (= "passthrough" (.asString (opt (.accessType p)))))
+    (let [details (opt (.externalUserDetails p))]
+      (is (= "suspended" (some-> details .accountStatus opt .asString)))
+      (is (= "non_profit" (some-> details .entityType opt .asString)))
+      (is (= "customer-2" (some-> details .referenceId opt)))))
   (let [^UserProfileCreateParams p (->user-profile-create-params {:relationship :unknown})]
     (is (not (.isPresent (.externalId p)))))
   (let [^com.anthropic.models.beta.userprofiles.UserProfileListParams p
@@ -2374,6 +2398,15 @@
 
 (deftest user-profile-response-mapping
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
+        external-details (-> (com.anthropic.models.beta.userprofiles.BetaUserProfileExternalUserDetails/builder)
+                             (.accountStatus (com.anthropic.models.beta.userprofiles.BetaUserProfileExternalUserDetails$AccountStatus/of "active"))
+                             (.country "US")
+                             (.emailHash "email-sha256")
+                             (.entityType (com.anthropic.models.beta.userprofiles.BetaUserProfileExternalUserDetails$EntityType/of "individual"))
+                             (.nameHash "name-sha256")
+                             (.onboardedAt ts)
+                             (.referenceId "customer-1")
+                             (.build))
         r (-> (BetaUserProfile/builder)
               (.id "up_1")
               (.metadata (-> (com.anthropic.models.beta.userprofiles.BetaUserProfile$Metadata/builder)
@@ -2384,6 +2417,7 @@
                                 (.build)))
               (.name "Ada")
               (.externalId "ada-1")
+              (.externalUserDetails external-details)
               (.externalUserOnboardedAt ts)
               (.type (com.anthropic.models.beta.userprofiles.BetaUserProfile$Type/of "user_profile"))
               (.createdAt ts)
@@ -2400,6 +2434,14 @@
     (is (= "ada-1" (:external-id m)))
     (is (= "2026-07-04T00:00Z" (:external-user-onboarded-at m)))
     (is (= :passthrough (:access-type m)))
+    (is (= {:account-status :active
+            :country "US"
+            :email-hash "email-sha256"
+            :entity-type :individual
+            :name-hash "name-sha256"
+            :onboarded-at "2026-07-04T00:00Z"
+            :reference-id "customer-1"}
+           (:external-user-details m)))
     (is (= {:source "admin"} (:trust-grants m)))
     (is (= {:url "https://example.test/enroll"
             :expires-at "2026-07-04T00:00Z"}
