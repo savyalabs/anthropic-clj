@@ -686,6 +686,35 @@
     (is (nil? (opt (.configs tool))))
     (is (nil? (opt (.defaultConfig tool))))))
 
+(deftest auto-mode-tool-permission-params
+  (testing "agent tool configs"
+    (doseq [tool [:bash :web-search]]
+      (is (true?
+           (let [config (invoke-private '->agent-tool-config
+                                        {:tool tool :enabled true
+                                         :permission-policy {:type :auto}})
+                 policy (case tool
+                          :bash (some-> config .asBash .permissionPolicy opt)
+                          :web-search (some-> config .asWebSearch .permissionPolicy opt))]
+             (.isAuto policy)))
+          (str "for " tool))))
+  (testing "agent toolset default config"
+    (is (true?
+         (let [toolset (invoke-private '->agent-toolset-20260401
+                                       {:default-config
+                                        {:enabled true
+                                         :permission-policy {:type :auto}}})]
+           (some-> toolset .defaultConfig opt .permissionPolicy opt .isAuto)))))
+  (testing "MCP config and default config"
+    (let [toolset (invoke-private '->mcp-toolset
+                                  {:mcp-server-name "github"
+                                   :configs [{:name "search" :enabled true
+                                              :permission-policy {:type :auto}}]
+                                   :default-config {:enabled true
+                                                    :permission-policy {:type :auto}}})]
+      (is (true? (some-> toolset .configs opt first .permissionPolicy opt .isAuto)))
+      (is (true? (some-> toolset .defaultConfig opt .permissionPolicy opt .isAuto))))))
+
 (deftest agents-platform-request-param-parity
   (let [^AgentCreateParams agent-create (->agent-create-params
                                           {:name "helper" :model "m"
@@ -1841,6 +1870,43 @@
     (is (= {:type :always-ask} (get-in mapped-mcp [:default-config :permission-policy])))
     (is (= {:type :always-ask} (get-in mapped-agent [:configs 0 :permission-policy])))
     (is (= {:type :always-ask} (get-in mapped-agent [:default-config :permission-policy])))))
+
+(deftest auto-mode-tool-permission-response-mapping
+  (let [auto (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy/builder)
+                 (.type (JsonValue/from "auto"))
+                 (.build))
+        bash-policy (-> (com.anthropic.models.beta.agents.BetaManagedAgentsBashToolConfig/builder)
+                        (.enabled true)
+                        (.permissionPolicy auto)
+                        (.type (JsonValue/from "bash"))
+                        (.build)
+                        (.permissionPolicy))
+        web-search-policy (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebSearchToolConfig/builder)
+                              (.enabled true)
+                              (.permissionPolicy auto)
+                              (.type (JsonValue/from "web_search"))
+                              (.build)
+                              (.permissionPolicy))
+        mcp-policy (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolConfig/builder)
+                       (.name "search")
+                       (.enabled true)
+                       (.permissionPolicy auto)
+                       (.build)
+                       (.permissionPolicy))
+        mcp-default-policy (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolsetDefaultConfig/builder)
+                               (.enabled true)
+                               (.permissionPolicy auto)
+                               (.build)
+                               (.permissionPolicy))
+        agent-default-policy (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolsetDefaultConfig/builder)
+                                 (.enabled true)
+                                 (.permissionPolicy auto)
+                                 (.build)
+                                 (.permissionPolicy))]
+    (doseq [policy [bash-policy web-search-policy mcp-policy
+                    mcp-default-policy agent-default-policy]]
+      (is (= {:type :auto}
+             (invoke-private 'permission-policy->map policy))))))
 
 (deftest session-agent-tool-response-mapping-shares-agent-tool-shape
   (let [custom (-> (com.anthropic.models.beta.agents.BetaManagedAgentsCustomTool/builder)
