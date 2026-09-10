@@ -5,6 +5,8 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-10
+
 ### Added
 
 - Support `:auto` tool permission policies for all Managed Agents tool and
