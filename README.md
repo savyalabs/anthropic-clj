@@ -55,7 +55,7 @@ Set `ANTHROPIC_API_KEY` in your environment, or pass client options:
 - `:configure` - receives the raw SDK builder last, for anything not wrapped
   here (interceptors, a custom `jsonMapper`, or a Bedrock/Vertex `backend`)
 
-Tracks [`com.anthropic/anthropic-java` 2.61.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.61.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 2.62.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.62.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 

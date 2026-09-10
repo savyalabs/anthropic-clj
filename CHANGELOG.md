@@ -5,6 +5,28 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Support `:auto` tool permission policies for all Managed Agents tool and
+  toolset permission-policy unions, in request builders and response maps.
+- Support all seven optional Managed Agents user-profile
+  `:external-user-details` fields for create, update, and response mapping.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.62.0**.
+- Make Managed Agents GitHub repository `:authorization-token` optional while
+  keeping `:url` required.
+
+### Audit
+
+- The new web-fetch `content_too_large` error code is covered by the existing
+  generic server-content-block conversion.
+- The `user-profiles-2026-09-04` beta flag is already accepted as a raw string
+  by the shared beta-name conversion.
+- Upstream streaming performance changes are internal to the SDK and require
+  no wrapper changes.
+
 ## [0.34.0] - 2026-09-04
 
 ### Changed
