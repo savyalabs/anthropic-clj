@@ -2803,10 +2803,10 @@
             (.build b))
     :github-repository (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams/builder)]
                          (when-not (:url resource) (missing-key! :url))
-                         (when-not (:authorization-token resource) (missing-key! :authorization-token))
                          (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams$Type/of "github_repository"))
                          (.url b ^String (:url resource))
-                         (.authorizationToken b ^String (:authorization-token resource))
+                         (when (:authorization-token resource)
+                           (.authorizationToken b ^String (:authorization-token resource)))
                          (when (:checkout resource)
                            (.checkout b ^com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams$Checkout
                                        (->github-checkout (:checkout resource))))

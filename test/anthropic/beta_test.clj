@@ -768,12 +768,19 @@
     (is (= ["vault-update-beta"] (mapv #(.asString %) (opt (.betas vault-update))))))
   (doseq [[resource key] [[{:type :file} :file-id]
                           [{:type :github-repository :authorization-token "token"} :url]
-                          [{:type :github-repository :url "https://x.test"} :authorization-token]
                           [{:type :memory-store} :memory-store-id]]]
     (let [d (ex-data-for #(->session-create-params
                            {:agent "agent_1" :environment-id "env_1" :resources [resource]}))]
       (is (= :missing-key (:anthropic/error d)))
-      (is (= key (:key d))))))
+      (is (= key (:key d)))))
+  (testing "GitHub repository authorization token is optional for sessions"
+    (let [params (->session-create-params
+                  {:agent "agent_1" :environment-id "env_1"
+                   :resources [{:type :github-repository
+                                :url "https://x.test"}]})
+          repository (.asGitHubRepository (first (opt (.resources params))))]
+      (is (= "https://x.test" (.url repository)))
+      (is (nil? (opt (.authorizationToken repository)))))))
 
 (deftest agent-multiagent-params
   (let [multiagent {:type :coordinator
@@ -1090,17 +1097,24 @@
                           :resources [{:type :unknown}]}))))))
 
 (deftest deployment-resource-required-keys
-  ;; The SDK rejects a null on these fields. A missing key must produce the
-  ;; library's :missing-key error, not a null pointer from the SDK.
+  ;; The SDK rejects null on the required fields. Authorization tokens became
+  ;; optional in 2.62.0, but repository URLs remain required.
   (doseq [[resource k] [[{:type :file} :file-id]
                         [{:type :github-repository :authorization-token "t"} :url]
-                        [{:type :github-repository :url "https://x.test"} :authorization-token]
                         [{:type :memory-store} :memory-store-id]]]
     (let [d (ex-data-for #(->deployment-create-params
                            {:name "n" :agent "a" :environment-id "e" :initial-events []
                             :resources [resource]}))]
       (is (= :missing-key (:anthropic/error d)) (str "for " resource))
-      (is (= k (:key d)) (str "for " resource)))))
+      (is (= k (:key d)) (str "for " resource))))
+  (testing "GitHub repository authorization token is optional for deployments"
+    (let [params (->deployment-create-params
+                  {:name "n" :agent "a" :environment-id "e" :initial-events []
+                   :resources [{:type :github-repository
+                                :url "https://x.test"}]})
+          repository (.asGitHubRepository (first (opt (.resources params))))]
+      (is (= "https://x.test" (.url repository)))
+      (is (nil? (opt (.authorizationToken repository)))))))
 
 (deftest session-thread-params
   (let [^ThreadRetrieveParams rp (->thread-retrieve-params "sess_1" "thread_1")
