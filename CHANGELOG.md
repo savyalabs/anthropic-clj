@@ -13,11 +13,15 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 - Support `:pause-after-compaction` and `:trigger` parameters on the
   `:compact-20260112` context management edit type for granular message
   compaction control.
+- Support beta message compaction config in create and token-count requests,
+  signed compaction content blocks, `:thinking-mismatch-allowed` input
+  transformations, and beta model compaction capabilities.
 - Support `:workspace-id` parameter in user-profile functions: `create-user-profile`,
   `get-user-profile`, `list-user-profiles`, `update-user-profile`, and
-  `create-user-profile-enrollment-url`.
-- Support `:url-sources` parameter on the web-fetch tool for restricting/allowing
-  specific tools as URL fetch sources (`:all`, `:none`, `:only`, `:except` variants).
+  `create-enrollment-url`.
+- Support `:url-sources` on stable and beta web-fetch tools, including `:all`,
+  `:none`, `:only`, `:except`, and `:tool-reference` union variants.
+- Return beta workspace data-residency geo enums as Clojure keywords.
 
 ### Changed
 

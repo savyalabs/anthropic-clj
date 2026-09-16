@@ -416,6 +416,15 @@ beta-only server tools. `run-beta-tools` accepts `:on-turn`. The library calls
 `:on-turn` with `(response params)` after each assistant turn. The params that
 `:on-turn` returns control the next iteration.
 
+The beta Messages create and token-count functions accept compaction config as
+`{:compaction {:type :summarize :instructions "..."}}`. Compaction content
+blocks use `{:type :compaction :content ... :encrypted-content ...
+:signature ...}`. Responses expose `:thinking-mismatch-allowed` input
+transformations with keyword reasons, and beta model maps include the
+`:compaction` capability. Beta web-fetch tools accept the same `:url-sources`
+map shown above, including `:all`, `:none`, `:only`, `:except`, and
+`:tool-reference` variants.
+
 Power users can use `beta-tool-runner-handle` for the SDK's blocking
 `BetaToolRunner`; its handle provides lazy `:messages` and `:streaming`
 sequences, `:set-next-params!`, and translated `:last-tool-response` access.
@@ -459,6 +468,8 @@ maps-in/maps-out shape and error contract as `anthropic.core`:
 - memory versions
 - organization compliance settings (`anthropic.organization/get-compliance-settings`,
   `anthropic.organization/update-compliance-settings`)
+- organization workspaces, with beta data-residency geo values returned as
+  keywords
 - user profiles (including `:external-user-onboarded-at`, `:order-by`, and `:workspace-id`)
 - webhook payload parsing (including verified header-based unwrapping)
 

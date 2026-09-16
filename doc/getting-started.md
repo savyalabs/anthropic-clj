@@ -13,16 +13,16 @@ an explicit integration suite.
 Leiningen:
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.35.0"]
+[net.clojars.savya/anthropic-clj "0.36.0"]
 ```
 
 tools.deps:
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.35.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.36.0"}
 ```
 
-Version `0.11.1` pins `com.anthropic/anthropic-java` `2.48.0`.
+Version `0.36.0` pins `com.anthropic/anthropic-java` `2.63.0`.
 
 ## Client
 
