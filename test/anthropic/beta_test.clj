@@ -96,6 +96,7 @@
                                                BetaWebhookSessionCreatedEventData
                                                UnwrapWebhookEvent)
            (com.anthropic.models.beta.models BetaCapabilitySupport
+                                             BetaCompactionCapability
                                              BetaContextManagementCapability
                                              BetaEffortCapability
                                              BetaModelCapabilities
@@ -248,10 +249,12 @@
                            (.adaptive support) (.enabled support) (.build))
         thinking (-> (BetaThinkingCapability/builder)
                      (.supported true) (.types thinking-types) (.build))
+        compaction (-> (BetaCompactionCapability/builder)
+                       (.summarize support) (.supported true) (.build))
         capabilities (-> (BetaModelCapabilities/builder)
                          (.batch support) (.citations support)
                          (.codeExecution support) (.contextManagement context)
-                         (.compaction (Optional/empty))
+                         (.compaction compaction)
                          (.effort effort) (.imageInput support)
                          (.pdfInput support) (.structuredOutputs support)
                          (.thinking thinking)
@@ -277,7 +280,8 @@
             :capabilities {:batch {:supported true}
                            :citations {:supported true}
                            :code-execution {:supported true}
-                           :compaction nil
+                           :compaction {:summarize {:supported true}
+                                        :supported true}
                            :context-management {:clear-thinking-20251015 {:supported true}
                                                  :clear-tool-uses-20250919 {:supported true}
                                                  :compact-20260112 {:supported true}

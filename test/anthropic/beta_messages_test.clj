@@ -1186,3 +1186,22 @@
         "nested block types are converted too")
     (is (= {:type "object" :city "Paris"} (-> mapped :content second :input))
         "tool input is caller data and must not be keywordized")))
+
+(deftest beta-compact-20260112-pause-and-trigger
+  (let [p (->params {:messages [{:role :user :content "hi"}]
+                   :context-management {:edits [{:type :compact-20260112
+                                                 :instructions "summarize"
+                                                 :pause-after-compaction true
+                                                 :trigger {:input-tokens 1000}}]}})
+        context-management (opt (.contextManagement p))]
+    (is (some? context-management))
+    (when-let [edits (and context-management (opt (.edits context-management)))]
+      (is (= 1 (count edits)))
+      (let [edit (first edits)]
+        (is (.isCompact20260112 edit))
+        (let [compact (.asCompact20260112 edit)]
+          (is (= "summarize" (opt (.instructions compact))))
+          (is (= true (opt (.pauseAfterCompaction compact))))
+          (is (some? (opt (.trigger compact))))
+          (let [trigger (opt (.trigger compact))]
+            (is (= 1000 (.value trigger)))))))))

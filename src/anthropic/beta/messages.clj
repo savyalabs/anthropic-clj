@@ -24,7 +24,12 @@
                                                BetaClearThinking20251015Edit
                                                BetaClearToolUses20250919Edit
                                                BetaCompact20260112Edit
+                                               BetaCompactionConfig
+                                               BetaCompactionBlockParam
+
                                                BetaDiagnosticsParam
+                                               BetaInputTokensTrigger
+
                                                BetaImageBlockParam
                                                BetaImageBlockParam$Source
                                                BetaJsonOutputFormat
@@ -344,6 +349,14 @@
                                             (:tool blk))]
                     (when cache-control (.cacheControl b (->cache-control cache-control)))
                     (BetaContentBlockParam/ofToolRemoval (.build b)))
+    :compaction
+    (let [b (com.anthropic.models.beta.messages.BetaCompactionBlockParam/builder)]
+      (when-let [content (:content blk)] (.content b ^String content))
+      (when-let [encrypted-content (:encrypted-content blk)]
+        (.encryptedContent b ^String encrypted-content))
+      (when-let [signature (:signature blk)] (.signature b ^String signature))
+      (when cache-control (.cacheControl b (->cache-control cache-control)))
+      (BetaContentBlockParam/ofCompaction (.build b)))
     (throw (ex-info "Unsupported beta content block type"
                     {:anthropic/error :unsupported-content-block :type type}))))
 
@@ -996,7 +1009,7 @@
       (.build b))))
 
 (defn- ->context-edit ^BetaContextManagementConfig$Edit
-  [{:keys [type clear-tool-inputs instructions keep] :as edit}]
+  [{:keys [type clear-tool-inputs instructions keep pause-after-compaction trigger] :as edit}]
   (case (keyword type)
     :clear-tool-uses-20250919
     (BetaContextManagementConfig$Edit/ofClearToolUses20250919
@@ -1015,6 +1028,10 @@
     (BetaContextManagementConfig$Edit/ofCompact20260112
      (let [b (BetaCompact20260112Edit/builder)]
        (when instructions (.instructions b ^String instructions))
+       (when (contains? edit :pause-after-compaction)
+         (.pauseAfterCompaction b (boolean pause-after-compaction)))
+       (when trigger
+         (.trigger b (BetaInputTokensTrigger/of (long (:input-tokens trigger)))))
        (.build b)))
     (throw (ex-info "Unsupported context management edit"
                     {:anthropic/error :unsupported-context-management-edit :type type}))))
@@ -1025,6 +1042,16 @@
     (doseq [edit edits]
       (.addEdit b ^BetaContextManagementConfig$Edit (->context-edit edit)))
     (.build b)))
+
+(defn- ->compaction
+  ^com.anthropic.models.beta.messages.BetaCompactionConfig
+  [{:keys [type instructions]}]
+  (case (keyword type)
+    :summarize (let [b (com.anthropic.models.beta.messages.BetaCompactionConfig/builder)]
+                 (when instructions (.instructions b ^String instructions))
+                 (.build b))
+    (throw (ex-info "Unsupported compaction type"
+                    {:anthropic/error :unsupported-compaction-type :type type}))))
 
 (defn- ->diagnostics ^BetaDiagnosticsParam
   [{:keys [previous-message-id]}]
@@ -1108,7 +1135,7 @@
   [{:keys [model max-tokens system messages tools temperature top-p top-k stop-sequences
            tool-choice thinking metadata service-tier response-format output-format output-type effort container inference-geo
            task-budget
-           context-management diagnostics speed
+           compaction context-management diagnostics speed
            user-profile-id cache-control betas mcp-servers fallbacks fallback-credit-token
            extra-headers extra-query extra-body]
     :or {model "claude-opus-4-8" max-tokens 1024}}]
@@ -1137,6 +1164,7 @@
     (when cache-control (.cacheControl b (->cache-control cache-control)))
     (when (or response-format output-type effort task-budget) (.outputConfig b (->output-config response-format effort task-budget output-type)))
     (when output-format (.outputFormat b (->json-output-format output-format)))
+    (when compaction (.compaction b (->compaction compaction)))
     (when context-management (.contextManagement b (->context-management context-management)))
     (when diagnostics (.diagnostics b (->diagnostics diagnostics)))
     (when speed
@@ -1162,7 +1190,7 @@
     (.build b)))
 
 (defn- ->count-params ^MessageCountTokensParams
-  [{:keys [model system messages tools thinking tool-choice betas cache-control context-management
+  [{:keys [model system messages tools thinking tool-choice betas cache-control compaction context-management
            mcp-servers response-format output-type effort task-budget output-format speed user-profile-id
            extra-headers extra-query extra-body]
     :or {model "claude-opus-4-8"}}]
@@ -1182,6 +1210,7 @@
     (when user-profile-id (.userProfileId b ^String user-profile-id))
     (when (or response-format output-type effort task-budget) (.outputConfig b (->output-config response-format effort task-budget output-type)))
     (when output-format (.outputFormat b (->json-output-format output-format)))
+    (when compaction (.compaction b (->compaction compaction)))
     (when context-management (.contextManagement b (->context-management context-management)))
     (when speed
       (.speed b (case (keyword speed)
@@ -1300,8 +1329,8 @@
 (defn create-beta-message
   "Send a beta Messages request and return a generic Clojure map response.
 
-  Request maps support context-management, diagnostics, speed, and tool-choice
-  disable-parallel-tool-use options. Tool specs support response-inclusion,
+  Request maps support compaction, context-management, diagnostics, speed, and
+  tool-choice disable-parallel-tool-use options. Tool specs support response-inclusion,
   input-examples, eager-input-streaming, caching, and dated :version options.
   System text and text content blocks accept citation-list `:citations`; document
   content blocks accept boolean or `{:enabled ...}` citation configuration.
@@ -1448,7 +1477,7 @@
 
 (defn count-beta-tokens
   "Count beta Messages input tokens without creating a message. Request maps
-  support cache-control, context-management, mcp-servers, response-format,
+  support cache-control, compaction, context-management, mcp-servers, response-format,
   output-type, effort, task-budget, output-format, speed, user-profile-id, extra-headers,
   extra-query, and extra-body. Returns :input-tokens and, when present, nested
   :context-management data."

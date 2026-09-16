@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+
+## [0.36.0] - 2026-09-16
+
+### Added
+
+- Support `:workspace-id` parameter in user-profile functions: `create-user-profile`,
+  `get-user-profile`, `list-user-profiles`, `update-user-profile`, and
+  `create-user-profile-enrollment-url`.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.63.0**.
+
 ## [0.35.0] - 2026-09-10
 
 ### Added

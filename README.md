@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.35.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.36.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.35.0"]
+[net.clojars.savya/anthropic-clj "0.36.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -55,7 +55,7 @@ Set `ANTHROPIC_API_KEY` in your environment, or pass client options:
 - `:configure` - receives the raw SDK builder last, for anything not wrapped
   here (interceptors, a custom `jsonMapper`, or a Bedrock/Vertex `backend`)
 
-Tracks [`com.anthropic/anthropic-java` 2.62.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.62.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 2.63.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.63.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -457,7 +457,7 @@ maps-in/maps-out shape and error contract as `anthropic.core`:
 - memory versions
 - organization compliance settings (`anthropic.organization/get-compliance-settings`,
   `anthropic.organization/update-compliance-settings`)
-- user profiles (including `:external-user-onboarded-at` and `:order-by`)
+- user profiles (including `:external-user-onboarded-at`, `:order-by`, and `:workspace-id`)
 - webhook payload parsing (including verified header-based unwrapping)
 
 ```clojure
