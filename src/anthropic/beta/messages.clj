@@ -541,8 +541,55 @@
     (.enabled b (boolean (if (map? citations) (:enabled citations) citations)))
     (.build b)))
 
+(defn- ->web-fetch-url-source-tools [tools]
+  (mapv (fn [{:keys [type name]}]
+          (case (keyword type)
+            :tool-reference
+            (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceToolReference/of
+             ^String name)
+            (throw (ex-info "Unsupported beta web-fetch URL source tool type"
+                            {:anthropic/error :unsupported-web-fetch-url-source-tool
+                             :type type}))))
+        tools))
+
+(defn- ->web-fetch-url-sources
+  ^com.anthropic.models.beta.messages.BetaWebFetchUrlSources
+  [{:keys [user-input client-tool-results server-tool-results]}]
+  (let [b (com.anthropic.models.beta.messages.BetaWebFetchUrlSources/builder)
+        set-source!
+        (fn [scope {:keys [type tools]}]
+          (let [type (keyword type)]
+            (case [scope type]
+              [:user-input :all]
+              (.userInput b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceAll/builder)))
+              [:user-input :none]
+              (.userInput b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceNone/builder)))
+              [:client-tool-results :all]
+              (.clientToolResults b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceAll/builder)))
+              [:client-tool-results :none]
+              (.clientToolResults b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceNone/builder)))
+              [:client-tool-results :only]
+              (.onlyClientToolResults b ^java.util.List (->web-fetch-url-source-tools tools))
+              [:client-tool-results :except]
+              (.exceptClientToolResults b ^java.util.List (->web-fetch-url-source-tools tools))
+              [:server-tool-results :all]
+              (.serverToolResults b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceAll/builder)))
+              [:server-tool-results :none]
+              (.serverToolResults b (.build (com.anthropic.models.beta.messages.BetaWebFetchUrlSourceNone/builder)))
+              [:server-tool-results :only]
+              (.onlyServerToolResults b ^java.util.List (->web-fetch-url-source-tools tools))
+              [:server-tool-results :except]
+              (.exceptServerToolResults b ^java.util.List (->web-fetch-url-source-tools tools))
+              (throw (ex-info "Unsupported beta web-fetch URL source"
+                              {:anthropic/error :unsupported-web-fetch-url-source
+                               :scope scope :type type})))))]
+    (when user-input (set-source! :user-input user-input))
+    (when client-tool-results (set-source! :client-tool-results client-tool-results))
+    (when server-tool-results (set-source! :server-tool-results server-tool-results))
+    (.build b)))
+
 (defn- ->web-fetch-tool ^BetaWebFetchTool20260318
-  [{:keys [max-uses max-content-tokens allowed-domains blocked-domains use-cache citations response-inclusion] :as t}]
+  [{:keys [max-uses max-content-tokens allowed-domains blocked-domains use-cache citations response-inclusion url-sources] :as t}]
   (validate-allowed-domains! t)
   (let [b (BetaWebFetchTool20260318/builder)]
     (when max-uses (.maxUses b (long max-uses)))
@@ -553,6 +600,7 @@
     (when citations (.citations b (->citations citations)))
     (when response-inclusion
       (.responseInclusion b (BetaWebFetchTool20260318$ResponseInclusion/of (name response-inclusion))))
+    (when url-sources (.urlSources b (->web-fetch-url-sources url-sources)))
     (configure-tool-builder
      t
      {:add-allowed-caller #(.addAllowedCaller ^BetaWebFetchTool20260318$Builder b
@@ -877,6 +925,9 @@
         (when-let [response-method (first (filter #(= "of" (.getName ^java.lang.reflect.Method %)) (.getMethods ^Class response-class)))]
           (invoke-method builder "responseInclusion"
                          (.invoke ^java.lang.reflect.Method response-method nil (object-array [(name v)]))))))
+    (when (str/starts-with? class-name "BetaWebFetchTool")
+      (when-let [url-sources (:url-sources t)]
+        (invoke-method builder "urlSources" (->web-fetch-url-sources url-sources))))
     (when (seq (:allowed-domains t)) (invoke-method builder "allowedDomains" ^java.util.List (vec (:allowed-domains t))))
     (when (seq (:blocked-domains t)) (invoke-method builder "blockedDomains" ^java.util.List (vec (:blocked-domains t))))
     (when (seq (:input-examples t))

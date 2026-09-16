@@ -125,6 +125,13 @@
                                           WebFetchTool20260318
                                           WebFetchTool20260318$AllowedCaller
                                           WebFetchTool20260318$ResponseInclusion
+                                          WebFetchUrlSources
+                                          WebFetchUrlSourceAll
+                                          WebFetchUrlSourceNone
+                                          WebFetchUrlSourceOnly
+                                          WebFetchUrlSourceExcept
+                                          WebFetchUrlSourceToolReference
+
                                           Usage)
            (com.anthropic.errors AnthropicException
                                  AnthropicIoException
@@ -514,13 +521,54 @@
       :strict! #(.strict ^com.anthropic.models.messages.WebSearchTool20260318$Builder b (boolean %))})
     (.build b)))
 
+(defn- ->web-fetch-url-source-tool-reference [{:keys [type name]}]
+  (case (keyword type)
+    :tool-reference (WebFetchUrlSourceToolReference/of ^String name)
+    (throw (ex-info "Unsupported web-fetch URL source tool type"
+                    {:anthropic/error :unsupported-web-fetch-url-source-tool :type type}))))
+
+(defn- ->web-fetch-url-sources ^WebFetchUrlSources
+  [{:keys [user-input client-tool-results server-tool-results]}]
+  (let [b (WebFetchUrlSources/builder)
+        build-source
+        (fn [{:keys [type tools]}]
+          (case (keyword type)
+            :all (.build (WebFetchUrlSourceAll/builder))
+            :none (.build (WebFetchUrlSourceNone/builder))
+            :only (.build (doto (WebFetchUrlSourceOnly/builder)
+                            (.tools ^java.util.List (mapv ->web-fetch-url-source-tool-reference tools))))
+            :except (.build (doto (WebFetchUrlSourceExcept/builder)
+                              (.tools ^java.util.List (mapv ->web-fetch-url-source-tool-reference tools))))
+            (throw (ex-info "Unsupported web-fetch URL source type"
+                            {:anthropic/error :unsupported-web-fetch-url-source-type :type type}))))]
+    (when user-input
+      (let [obj (build-source user-input)]
+        (if (instance? WebFetchUrlSourceAll obj)
+          (.userInput b ^WebFetchUrlSourceAll obj)
+          (.userInput b ^WebFetchUrlSourceNone obj))))
+    (when client-tool-results
+      (let [obj (build-source client-tool-results)]
+        (cond
+          (instance? WebFetchUrlSourceAll obj) (.clientToolResults b ^WebFetchUrlSourceAll obj)
+          (instance? WebFetchUrlSourceNone obj) (.clientToolResults b ^WebFetchUrlSourceNone obj)
+          (instance? WebFetchUrlSourceOnly obj) (.clientToolResults b ^WebFetchUrlSourceOnly obj)
+          (instance? WebFetchUrlSourceExcept obj) (.clientToolResults b ^WebFetchUrlSourceExcept obj))))
+    (when server-tool-results
+      (let [obj (build-source server-tool-results)]
+        (cond
+          (instance? WebFetchUrlSourceAll obj) (.serverToolResults b ^WebFetchUrlSourceAll obj)
+          (instance? WebFetchUrlSourceNone obj) (.serverToolResults b ^WebFetchUrlSourceNone obj)
+          (instance? WebFetchUrlSourceOnly obj) (.serverToolResults b ^WebFetchUrlSourceOnly obj)
+          (instance? WebFetchUrlSourceExcept obj) (.serverToolResults b ^WebFetchUrlSourceExcept obj))))
+    (.build b)))
+
 (defn- ->citations-config ^CitationsConfigParam [enabled]
   (-> (CitationsConfigParam/builder)
       (.enabled (boolean (if (map? enabled) (:enabled enabled) enabled)))
       (.build)))
 
 (defn- ->web-fetch-tool ^WebFetchTool20260318
-  [{:keys [max-uses max-content-tokens allowed-domains blocked-domains use-cache citations response-inclusion] :as t}]
+  [{:keys [max-uses max-content-tokens allowed-domains blocked-domains use-cache citations response-inclusion url-sources] :as t}]
   (validate-allowed-domains! t)
   (let [b (WebFetchTool20260318/builder)]
     (when max-uses (.maxUses b (long max-uses)))
@@ -531,6 +579,7 @@
     (when citations (.citations b (->citations-config citations)))
     (when response-inclusion
       (.responseInclusion b (WebFetchTool20260318$ResponseInclusion/of (name response-inclusion))))
+    (when url-sources (.urlSources b (->web-fetch-url-sources url-sources)))
     (configure-tool-builder
      t
      {:add-allowed-caller #(.addAllowedCaller ^com.anthropic.models.messages.WebFetchTool20260318$Builder b
@@ -686,19 +735,19 @@
    {"20250910" {:builder "com.anthropic.models.messages.WebFetchTool20250910$Builder"
                 :union "ofWebFetchTool20250910"
                 :count "ofWebFetchTool20250910"
-                :features #{:common :domains :max-uses :max-content-tokens :citations}}
+                :features #{:common :domains :max-uses :max-content-tokens :citations :url-sources}}
     "20260209" {:builder "com.anthropic.models.messages.WebFetchTool20260209$Builder"
                 :union "ofWebFetchTool20260209"
                 :count "ofWebFetchTool20260209"
-                :features #{:common :domains :max-uses :max-content-tokens :citations}}
+                :features #{:common :domains :max-uses :max-content-tokens :citations :url-sources}}
     "20260309" {:builder "com.anthropic.models.messages.WebFetchTool20260309$Builder"
                 :union "ofWebFetchTool20260309"
                 :count "ofWebFetchTool20260309"
-                :features #{:common :domains :max-uses :max-content-tokens :citations :use-cache}}
+                :features #{:common :domains :max-uses :max-content-tokens :citations :use-cache :url-sources}}
     "20260318" {:builder "com.anthropic.models.messages.WebFetchTool20260318$Builder"
                 :union "ofWebFetchTool20260318"
                 :count "ofWebFetchTool20260318"
-                :features #{:common :domains :max-uses :max-content-tokens :citations :use-cache :response-inclusion}}}})
+                :features #{:common :domains :max-uses :max-content-tokens :citations :use-cache :response-inclusion :url-sources}}}})
 
 (defn- ->version-string [version]
   (if (keyword? version) (name version) version))
@@ -759,6 +808,8 @@
               response-class (Class/forName (str tool-class "$ResponseInclusion"))]
           (instance-call b "responseInclusion"
                          (static-call response-class "of" [(name response-inclusion)])))))
+    (when (and (contains? features :url-sources) (:url-sources t))
+      (instance-call b "urlSources" (->web-fetch-url-sources (:url-sources t))))
     (configure-tool-builder
      t
      {:add-allowed-caller
