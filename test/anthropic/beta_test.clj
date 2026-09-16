@@ -96,6 +96,7 @@
                                                BetaWebhookSessionCreatedEventData
                                                UnwrapWebhookEvent)
            (com.anthropic.models.beta.models BetaCapabilitySupport
+                                             BetaCompactionCapability
                                              BetaContextManagementCapability
                                              BetaEffortCapability
                                              BetaModelCapabilities
@@ -248,9 +249,12 @@
                            (.adaptive support) (.enabled support) (.build))
         thinking (-> (BetaThinkingCapability/builder)
                      (.supported true) (.types thinking-types) (.build))
+        compaction (-> (BetaCompactionCapability/builder)
+                       (.summarize support) (.supported true) (.build))
         capabilities (-> (BetaModelCapabilities/builder)
                          (.batch support) (.citations support)
                          (.codeExecution support) (.contextManagement context)
+                         (.compaction compaction)
                          (.effort effort) (.imageInput support)
                          (.pdfInput support) (.structuredOutputs support)
                          (.thinking thinking)
@@ -276,6 +280,8 @@
             :capabilities {:batch {:supported true}
                            :citations {:supported true}
                            :code-execution {:supported true}
+                           :compaction {:summarize {:supported true}
+                                        :supported true}
                            :context-management {:clear-thinking-20251015 {:supported true}
                                                  :clear-tool-uses-20250919 {:supported true}
                                                  :compact-20260112 {:supported true}
@@ -1229,6 +1235,7 @@
 (deftest user-profile-params
   (let [^UserProfileCreateParams p (->user-profile-create-params
                                     {:name "Ada" :external-id "ada-1" :metadata {:team "x"}
+                                     :workspace-id "ws_1"
                                      :external-user-onboarded-at "2026-07-04T00:00:00Z"
                                      :external-user-details
                                      {:account-status :active
@@ -1241,6 +1248,7 @@
                                      :access-type :application})]
     (is (= "Ada" (opt (.name p))))
     (is (= "ada-1" (opt (.externalId p))))
+    (is (= "ws_1" (opt (.workspaceId p))))
     (is (= "2026-07-04T00:00Z" (str (opt (.externalUserOnboardedAt p)))))
     (is (= "application" (some-> (.accessType p) opt .asString)))
     (let [details (opt (.externalUserDetails p))]
@@ -1253,6 +1261,7 @@
       (is (= "customer-1" (some-> details .referenceId opt)))))
   (let [^UserProfileUpdateParams p (->user-profile-update-params "up_1"
                                                                   {:name "Ada L"
+                                                                   :workspace-id "ws_2"
                                                                    :external-user-onboarded-at "2026-07-05T00:00:00Z"
                                                                    :external-user-details
                                                                    {:account-status :suspended
@@ -1261,6 +1270,7 @@
                                                                    :access-type :passthrough})]
     (is (= "up_1" (opt (.userProfileId p))))
     (is (= "Ada L" (opt (.name p))))
+    (is (= "ws_2" (opt (.workspaceId p))))
     (is (= "2026-07-05T00:00Z" (str (opt (.externalUserOnboardedAt p)))))
     (is (= "passthrough" (.asString (opt (.accessType p)))))
     (let [details (opt (.externalUserDetails p))]
@@ -1270,11 +1280,17 @@
   (let [^UserProfileCreateParams p (->user-profile-create-params {:relationship :unknown})]
     (is (not (.isPresent (.externalId p)))))
   (let [^com.anthropic.models.beta.userprofiles.UserProfileListParams p
-        (invoke-private '->user-profile-list-params {:order-by :name})]
-    (is (= "name" (.asString (opt (.orderBy p))))))
+        (invoke-private '->user-profile-list-params {:order-by :name :workspace-id "ws_3"})]
+    (is (= "name" (.asString (opt (.orderBy p)))))
+    (is (= "ws_3" (opt (.workspaceId p)))))
+  (let [^com.anthropic.models.beta.userprofiles.UserProfileRetrieveParams p
+        (invoke-private '->user-profile-retrieve-params "up_1" {:workspace-id "ws_4"})]
+    (is (= "up_1" (opt (.userProfileId p))))
+    (is (= "ws_4" (opt (.workspaceId p)))))
   (let [^UserProfileCreateEnrollmentUrlParams p
-        (->user-profile-enrollment-url-params "up_1")]
-    (is (= "up_1" (opt (.userProfileId p))))))
+        (->user-profile-enrollment-url-params "up_1" {:workspace-id "ws_5"})]
+    (is (= "up_1" (opt (.userProfileId p))))
+    (is (= "ws_5" (opt (.workspaceId p))))))
 
 (deftest skill-response-mapping
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")

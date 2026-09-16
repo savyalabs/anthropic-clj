@@ -896,6 +896,28 @@
     (is (= "credit-token" (:fallback-credit-token explicit-json)))
     (is (= "default" (:fallbacks default-json)))))
 
+(deftest beta-compaction-request-params-and-content-block
+  (doseq [params-fn [->params ->count-params]]
+    (let [params (params-fn {:messages [{:role :user :content "hi"}]
+                             :compaction {:type :summarize
+                                          :instructions "Keep decisions."}})
+          body (json-roundtrip (._body params))]
+      (is (= {:type "summarize" :instructions "Keep decisions."}
+             (:compaction body)))))
+  (let [block (->content-block {:type :compaction
+                                :content "summary"
+                                :encrypted-content "ciphertext"
+                                :signature "signature"
+                                :cache-control {:ttl :1h}})
+        body (json-roundtrip block)]
+    (is (.isCompaction block))
+    (is (= {:type "compaction"
+            :content "summary"
+            :encrypted-content "ciphertext"
+            :signature "signature"
+            :cache-control {:type "ephemeral" :ttl "1h"}}
+           body))))
+
 (deftest beta-message-json-conversion
   (let [message (-> (BetaMessage/builder)
                     (.id "msg_123")
@@ -905,15 +927,27 @@
                     (.diagnostics (java.util.Optional/empty))
                     (.role (JsonValue/from "assistant"))
                     (.addContent (-> (BetaTextBlock/builder) (.citations []) (.text "hello") (.build)))
+                    (.addContent
+                     (-> (com.anthropic.models.beta.messages.BetaCompactionBlock/builder)
+                         (.content "summary")
+                         (.encryptedContent "ciphertext")
+                         (.signature "signature")
+                         (.build)))
                     (.stopReason (com.anthropic.models.beta.messages.BetaStopReason/of "end_turn"))
                     (.stopDetails (java.util.Optional/empty))
                     (.stopSequence (java.util.Optional/empty))
-                    (.inputTransformations
-                     [(-> (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation/builder)
-                          (.type (JsonValue/from "thinking_dropped_input_transformation"))
-                          (.path "/messages/0")
-                          (.reason (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation$Reason/of "prefix_binding_mismatch"))
-                          (.build))])
+                    (.addInputTransformation
+                     (-> (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation/builder)
+                         (.type (JsonValue/from "thinking_dropped_input_transformation"))
+                         (.path "/messages/0")
+                         (.reason (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation$Reason/of "prefix_binding_mismatch"))
+                         (.build)))
+                    (.addInputTransformation
+                     (-> (com.anthropic.models.beta.messages.BetaThinkingMismatchAllowedInputTransformation/builder)
+                         (.path "/messages/1")
+                         (.reason (com.anthropic.models.beta.messages.BetaThinkingMismatchAllowedInputTransformation$Reason/of
+                                   "model_binding_mismatch"))
+                         (.build)))
                     (.type (JsonValue/from "message"))
                     (.usage (-> (BetaUsage/builder)
                                 (.inputTokens 12)
@@ -935,8 +969,15 @@
     (is (= :end-turn (:stop-reason result)))
     (is (= :message (:type result)))
     (is (= [{:type :thinking-dropped-input-transformation
-             :path "/messages/0" :reason :prefix-binding-mismatch}]
+             :path "/messages/0" :reason :prefix-binding-mismatch}
+            {:type :thinking-mismatch-allowed
+             :path "/messages/1" :reason :model-binding-mismatch}]
            (:input-transformations result)))
+    (is (= {:type :compaction
+            :content "summary"
+            :encrypted-content "ciphertext"
+            :signature "signature"}
+           (second (:content result))))
     (is (= {:input-tokens 12 :output-tokens 4} (:usage result)))))
 
 (deftest count-beta-tokens-translation-and-conversion
@@ -1186,3 +1227,22 @@
         "nested block types are converted too")
     (is (= {:type "object" :city "Paris"} (-> mapped :content second :input))
         "tool input is caller data and must not be keywordized")))
+
+(deftest beta-compact-20260112-pause-and-trigger
+  (let [p (->params {:messages [{:role :user :content "hi"}]
+                   :context-management {:edits [{:type :compact-20260112
+                                                 :instructions "summarize"
+                                                 :pause-after-compaction true
+                                                 :trigger {:input-tokens 1000}}]}})
+        context-management (opt (.contextManagement p))]
+    (is (some? context-management))
+    (when-let [edits (and context-management (opt (.edits context-management)))]
+      (is (= 1 (count edits)))
+      (let [edit (first edits)]
+        (is (.isCompact20260112 edit))
+        (let [compact (.asCompact20260112 edit)]
+          (is (= "summarize" (opt (.instructions compact))))
+          (is (= true (opt (.pauseAfterCompaction compact))))
+          (is (some? (opt (.trigger compact))))
+          (let [trigger (opt (.trigger compact))]
+            (is (= 1000 (.value trigger)))))))))

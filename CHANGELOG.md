@@ -5,6 +5,28 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+
+## [0.36.0] - 2026-09-16
+
+### Added
+
+- Support `:pause-after-compaction` and `:trigger` parameters on the
+  `:compact-20260112` context management edit type for granular message
+  compaction control.
+- Support beta message compaction config in create and token-count requests,
+  signed compaction content blocks, `:thinking-mismatch-allowed` input
+  transformations, and beta model compaction capabilities.
+- Support `:workspace-id` parameter in user-profile functions: `create-user-profile`,
+  `get-user-profile`, `list-user-profiles`, `update-user-profile`, and
+  `create-enrollment-url`.
+- Support `:url-sources` on stable and beta web-fetch tools, including `:all`,
+  `:none`, `:only`, `:except`, and `:tool-reference` union variants.
+- Return beta workspace data-residency geo enums as Clojure keywords.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.63.0**.
+
 ## [0.35.0] - 2026-09-10
 
 ### Added

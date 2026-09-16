@@ -73,6 +73,7 @@
 (def ->tool #'a/->tool)
 (def beta->tool #'beta/->tool)
 (def ->count-tool #'a/->count-tool)
+(def beta->count-tool #'beta/->count-tool)
 (def reduce-batch-result-stream #'a/reduce-batch-result-stream)
 (def file->map #'a/file->map)
 (def deleted-file->map
@@ -1917,3 +1918,36 @@
     (let [orig (com.anthropic.errors.AnthropicInvalidDataException. "bad" nil)
           ex (try (throw-normalized! orig) (catch Throwable e e))]
       (is (identical? orig ex)))))
+
+(deftest web-fetch-url-sources
+  (let [spec {:type :web-fetch
+              :url-sources {:user-input {:type :all}
+                            :client-tool-results {:type :only
+                                                  :tools [{:type :tool-reference
+                                                           :name "browser"}]}
+                            :server-tool-results {:type :except
+                                                  :tools [{:type :tool-reference
+                                                           :name "web-search"}]}}}
+        ^WebFetchTool20260318 stable
+        (.asWebFetchTool20260318 ^ToolUnion (->tool spec))
+        ^BetaWebFetchTool20260318 beta-tool
+        (.asWebFetchTool20260318 ^BetaToolUnion (beta->tool spec))]
+    (doseq [tool [stable beta-tool]]
+      (let [sources (opt (.urlSources tool))
+            user-input (opt (.userInput sources))
+            client-results (opt (.clientToolResults sources))
+            server-results (opt (.serverToolResults sources))]
+        (is (.isAll user-input))
+        (is (.isOnly client-results))
+        (is (= ["browser"] (mapv #(.name %) (opt (.tools client-results)))))
+        (is (.isExcept server-results))
+        (is (= ["web-search"] (mapv #(.name %) (opt (.tools server-results)))))))
+    (let [none-spec {:type :web-fetch
+                     :url-sources {:user-input {:type :none}}}]
+      (doseq [tool [(->tool none-spec) (beta->tool none-spec)]]
+        (is (.isNone (opt (.userInput (opt (.urlSources tool))))))))
+    (doseq [version [:20250910 :20260209 :20260309 :20260318]
+            count-tool [(->count-tool (assoc spec :version version))
+                        (beta->count-tool (assoc spec :version version))]]
+      (is (.isAll (opt (.userInput (opt (.urlSources count-tool)))))
+          (str "count-tokens " version " URL sources")))))

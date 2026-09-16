@@ -3,11 +3,18 @@
             [anthropic.organization])
   (:import (com.anthropic.models.beta.organization.users BetaOrganizationUser)
            (com.anthropic.models.beta.organization BetaOrganizationRole)
-           (com.anthropic.models.beta.organization.workspaces BetaWorkspaceMember
+           (com.anthropic.models.beta.organization.workspaces BetaAllowedInferenceGeo
+                                                              BetaDataResidency
+                                                              BetaDataResidency$DefaultInferenceGeo
+                                                              BetaDataResidency$WorkspaceGeo
+                                                              BetaWorkspace
+                                                              BetaWorkspace$Tags
+                                                              BetaWorkspaceMember
                                                               BetaWorkspaceRole)
            (com.anthropic.models.beta.organization.federation.rules BetaServiceAccountTarget
                                                                     BetaFederationRuleMatch)
-           (java.time OffsetDateTime)))
+           (java.time OffsetDateTime)
+           (java.util Optional)))
 
 (defn- private-fn [sym]
   (let [v (ns-resolve 'anthropic.organization sym)]
@@ -101,6 +108,32 @@
     (is (= "user_9" (:user-id m)))
     (is (= "wrkspc_9" (:workspace-id m)))
     (is (= :workspace-developer (:workspace-role m)))))
+
+(deftest workspace-data-residency-enums-are-keywords
+  (let [convert (private-fn 'workspace->map)
+        data-residency (-> (BetaDataResidency/builder)
+                           (.allowedInferenceGeosOfGeos
+                            [(BetaAllowedInferenceGeo/of "global")
+                             (BetaAllowedInferenceGeo/of "us")])
+                           (.defaultInferenceGeo
+                            (BetaDataResidency$DefaultInferenceGeo/of "global"))
+                           (.workspaceGeo (BetaDataResidency$WorkspaceGeo/of "us"))
+                           .build)
+        workspace (-> (BetaWorkspace/builder)
+                      (.id "wrkspc_1")
+                      (.archivedAt (Optional/empty))
+                      (.compartmentId "compartment_1")
+                      (.createdAt (OffsetDateTime/parse "2026-09-16T00:00:00Z"))
+                      (.dataResidency data-residency)
+                      (.displayColor "#123456")
+                      (.externalKeyId (Optional/empty))
+                      (.name "US workspace")
+                      (.tags (.build (BetaWorkspace$Tags/builder)))
+                      .build)]
+    (is (= {:allowed-inference-geos [:global :us]
+            :default-inference-geo :global
+            :workspace-geo :us}
+           (:data-residency (convert workspace))))))
 
 ;; ---- public surface -------------------------------------------------------
 

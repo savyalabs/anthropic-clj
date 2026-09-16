@@ -702,6 +702,8 @@
                           (fn [s#] (com.anthropic.models.beta.userprofiles.UserProfileListParams$OrderBy/of s#))
                           :order-by)]
         (.orderBy b value)))
+    (when-let [workspace-id (:workspace-id opts)]
+      (.workspaceId b ^String workspace-id))
     (.build b)))
 
 ;; ---- Skills ---------------------------------------------------------------
@@ -3883,7 +3885,8 @@
     (.build b)))
 
 (defn- ->user-profile-create-params ^UserProfileCreateParams
-  [{:keys [name external-id external-user-details external-user-onboarded-at metadata access-type]}]
+  [{:keys [name external-id external-user-details external-user-onboarded-at metadata access-type
+           workspace-id]}]
   (let [b (UserProfileCreateParams/builder)]
     (when name (.name b ^String name))
     (when external-id (.externalId b ^String external-id))
@@ -3894,10 +3897,12 @@
     (when access-type (.accessType b ^UserProfileCreateParams$AccessType
                                     (->enum-value access-type #{:application :passthrough}
                                                   (fn [s#] (UserProfileCreateParams$AccessType/of s#)) :access-type)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
     (.build b)))
 
 (defn- ->user-profile-update-params ^UserProfileUpdateParams
-  [user-profile-id {:keys [name external-id external-user-details external-user-onboarded-at metadata access-type]}]
+  [user-profile-id {:keys [name external-id external-user-details external-user-onboarded-at metadata access-type
+                           workspace-id]}]
   (let [b (UserProfileUpdateParams/builder)]
     (.userProfileId b ^String user-profile-id)
     (when name (.name b ^String name))
@@ -3909,13 +3914,24 @@
     (when access-type (.accessType b ^UserProfileUpdateParams$AccessType
                                     (->enum-value access-type #{:application :passthrough}
                                                   (fn [s#] (UserProfileUpdateParams$AccessType/of s#)) :access-type)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-retrieve-params
+  ^com.anthropic.models.beta.userprofiles.UserProfileRetrieveParams
+  [user-profile-id {:keys [workspace-id]}]
+  (let [b (com.anthropic.models.beta.userprofiles.UserProfileRetrieveParams/builder)]
+    (.userProfileId b ^String user-profile-id)
+    (when workspace-id (.workspaceId b ^String workspace-id))
     (.build b)))
 
 (defn- ->user-profile-enrollment-url-params ^UserProfileCreateEnrollmentUrlParams
-  [user-profile-id]
+  ([user-profile-id] (->user-profile-enrollment-url-params user-profile-id {}))
+  ([user-profile-id {:keys [workspace-id]}]
   (let [b (UserProfileCreateEnrollmentUrlParams/builder)]
     (.userProfileId b ^String user-profile-id)
-    (.build b)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b))))
 
 (defn- external-user-details->map [^BetaUserProfileExternalUserDetails details]
   (cond-> {}
@@ -3960,21 +3976,25 @@
 (defn create-user-profile
   "Create a user profile with optional `:name`, `:external-id`, `:metadata`,
   `:access-type` (`:application` or `:passthrough`), and optional
-  `:external-user-details` and `:external-user-onboarded-at`. Returns the
-  profile map."
+  `:external-user-details`, `:external-user-onboarded-at`, and `:workspace-id`.
+  Returns the profile map."
   [^AnthropicClient client req]
   (with-api-errors
     (user-profile->map (-> (.beta client) (.userProfiles)
                            (.create (->user-profile-create-params req))))))
 
 (defn get-user-profile
-  "Get a user profile by id."
-  [^AnthropicClient client ^String user-profile-id]
-  (with-api-errors
-    (user-profile->map (-> (.beta client) (.userProfiles) (.retrieve user-profile-id)))))
+  "Get a user profile by id. Optional `opts` accepts `:workspace-id`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (get-user-profile client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id opts]
+   (with-api-errors
+     (user-profile->map (-> (.beta client) (.userProfiles)
+                            (.retrieve (->user-profile-retrieve-params user-profile-id opts)))))))
 
 (defn list-user-profiles
-  "List user profiles with optional `:limit`, `:order`, `:order-by`, `:page`, and `:betas`."
+  "List user profiles with optional `:limit`, `:order`, `:order-by`, `:page`,
+  `:workspace-id`, and `:betas`."
   ([^AnthropicClient client] (list-user-profiles client {}))
   ([^AnthropicClient client opts]
    (with-api-errors
@@ -3985,7 +4005,7 @@
 (defn update-user-profile
   "Update a user profile's `:name`, `:external-id`, `:metadata`,
   `:access-type` (`:application` or `:passthrough`),
-  `:external-user-details`, or `:external-user-onboarded-at`."
+  `:external-user-details`, `:external-user-onboarded-at`, or `:workspace-id`."
   [^AnthropicClient client ^String user-profile-id changes]
   (with-api-errors
     (user-profile->map (-> (.beta client) (.userProfiles)
@@ -3993,12 +4013,15 @@
 
 (defn create-enrollment-url
   "Create an enrollment URL for a user profile. Returns `{:url ...
-  :expires-at ...}`."
-  [^AnthropicClient client ^String user-profile-id]
-  (with-api-errors
-    (enrollment-url->map (-> (.beta client) (.userProfiles)
-                             (.createEnrollmentUrl
-                              (->user-profile-enrollment-url-params user-profile-id))))))
+  :expires-at ...}`. Optional `opts` accepts `:workspace-id`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (create-enrollment-url client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id opts]
+   (with-api-errors
+     (let [^UserProfileCreateEnrollmentUrlParams params
+           (->user-profile-enrollment-url-params user-profile-id opts)]
+       (enrollment-url->map (-> (.beta client) (.userProfiles)
+                                (.createEnrollmentUrl params)))))))
 
 ;; ---- Webhooks --------------------------------------------------------------
 

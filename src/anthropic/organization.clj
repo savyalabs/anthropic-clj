@@ -522,12 +522,31 @@
 
 ;; ---- Workspaces -----------------------------------------------------------
 
+(defn- data-residency->map
+  [^com.anthropic.models.beta.organization.workspaces.BetaDataResidency r]
+  (let [allowed (.allowedInferenceGeos r)]
+    {:allowed-inference-geos
+     (cond
+       (.isGeos allowed)
+       (mapv #(kw<- (.asString
+                     ^com.anthropic.models.beta.organization.workspaces.BetaAllowedInferenceGeo %))
+             (.asGeos allowed))
+       (.isUnrestricted allowed) :unrestricted)
+     :default-inference-geo
+     (kw<- (.asString
+            ^com.anthropic.models.beta.organization.workspaces.BetaDataResidency$DefaultInferenceGeo
+            (.defaultInferenceGeo r)))
+     :workspace-geo
+     (kw<- (.asString
+            ^com.anthropic.models.beta.organization.workspaces.BetaDataResidency$WorkspaceGeo
+            (.workspaceGeo r)))}))
+
 (defn- workspace->map [^com.anthropic.models.beta.organization.workspaces.BetaWorkspace r]
   {:id (.id r)
    :archived-at (some-> (.archivedAt r) unopt str)
    :compartment-id (.compartmentId r)
    :created-at (str (.createdAt r))
-   :data-residency (obj->clj (.dataResidency r))
+   :data-residency (data-residency->map (.dataResidency r))
    :display-color (.displayColor r)
    :external-key-id (unopt (.externalKeyId r))
    :name (.name r)
