@@ -251,6 +251,7 @@
         capabilities (-> (BetaModelCapabilities/builder)
                          (.batch support) (.citations support)
                          (.codeExecution support) (.contextManagement context)
+                         (.compaction (Optional/empty))
                          (.effort effort) (.imageInput support)
                          (.pdfInput support) (.structuredOutputs support)
                          (.thinking thinking)
@@ -276,6 +277,7 @@
             :capabilities {:batch {:supported true}
                            :citations {:supported true}
                            :code-execution {:supported true}
+                           :compaction nil
                            :context-management {:clear-thinking-20251015 {:supported true}
                                                  :clear-tool-uses-20250919 {:supported true}
                                                  :compact-20260112 {:supported true}

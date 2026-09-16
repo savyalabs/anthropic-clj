@@ -908,12 +908,12 @@
                     (.stopReason (com.anthropic.models.beta.messages.BetaStopReason/of "end_turn"))
                     (.stopDetails (java.util.Optional/empty))
                     (.stopSequence (java.util.Optional/empty))
-                    (.inputTransformations
-                     [(-> (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation/builder)
-                          (.type (JsonValue/from "thinking_dropped_input_transformation"))
-                          (.path "/messages/0")
-                          (.reason (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation$Reason/of "prefix_binding_mismatch"))
-                          (.build))])
+                    (.addInputTransformation
+                     (-> (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation/builder)
+                         (.type (JsonValue/from "thinking_dropped_input_transformation"))
+                         (.path "/messages/0")
+                         (.reason (com.anthropic.models.beta.messages.BetaThinkingDroppedInputTransformation$Reason/of "prefix_binding_mismatch"))
+                         (.build)))
                     (.type (JsonValue/from "message"))
                     (.usage (-> (BetaUsage/builder)
                                 (.inputTokens 12)
