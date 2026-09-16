@@ -10,6 +10,9 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ### Added
 
+- Support `:pause-after-compaction` and `:trigger` parameters on the
+  `:compact-20260112` context management edit type for granular message
+  compaction control.
 - Support `:workspace-id` parameter in user-profile functions: `create-user-profile`,
   `get-user-profile`, `list-user-profiles`, `update-user-profile`, and
   `create-user-profile-enrollment-url`.
