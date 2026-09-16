@@ -150,7 +150,9 @@ each tool. The model runs the tools server-side. The response content carries
             :allowed-domains ["clojure.org"]        ; or :blocked-domains
             :user-location {:city "Paris" :country "FR"}
             :allowed-callers [:direct]}             ; some models need :direct
-           {:type :web-fetch :max-content-tokens 4096}
+           {:type :web-fetch :max-content-tokens 4096
+            :url-sources {:user-input {:type :all}
+                          :client-tool-results {:type :only :tools [{:type :tool-reference :name "search"}]}}}
            {:type :code-execution}
            {:type :bash}
            {:type :text-editor :max-characters 2000}

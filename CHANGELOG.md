@@ -16,6 +16,8 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 - Support `:workspace-id` parameter in user-profile functions: `create-user-profile`,
   `get-user-profile`, `list-user-profiles`, `update-user-profile`, and
   `create-user-profile-enrollment-url`.
+- Support `:url-sources` parameter on the web-fetch tool for restricting/allowing
+  specific tools as URL fetch sources (`:all`, `:none`, `:only`, `:except` variants).
 
 ### Changed
 
