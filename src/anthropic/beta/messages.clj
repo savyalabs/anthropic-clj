@@ -24,8 +24,6 @@
                                                BetaClearThinking20251015Edit
                                                BetaClearToolUses20250919Edit
                                                BetaCompact20260112Edit
-                                               BetaCompactionConfig
-                                               BetaCompactionBlockParam
 
                                                BetaDiagnosticsParam
                                                BetaInputTokensTrigger
