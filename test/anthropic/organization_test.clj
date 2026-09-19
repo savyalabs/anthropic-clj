@@ -135,6 +135,23 @@
             :workspace-geo :us}
            (:data-residency (convert workspace))))))
 
+(deftest rate-limit-group-roundtrips-through-custom-conversion
+  (let [rate-limit->map (private-fn 'rate-limit->map)
+        rate-limit (-> (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit/builder)
+                       (.id "rl_1")
+                       (.group (-> (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitModelGroup/builder)
+                                   (.id "model-group-1")
+                                   (.displayName "Claude models")
+                                   (.build)))
+                       (.groupType (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit$GroupType/of "model"))
+                       (.limits [])
+                       (.models [])
+                       (.build))]
+    (is (= {:id "model-group-1"
+            :display-name "Claude models"
+            :type "model-group"}
+           (:group (rate-limit->map rate-limit))))))
+
 ;; ---- public surface -------------------------------------------------------
 
 (deftest public-api-covers-every-service

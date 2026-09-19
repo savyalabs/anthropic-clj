@@ -1411,9 +1411,14 @@
 
 (defn- beta-tool-result [block f]
   (try
-    {:type :tool-result
-     :tool-use-id (:id block)
-     :content (f (:input block))}
+    (let [result (f (:input block))
+          compact? (and (map? result) (:compact-before-next-turn result))]
+      (cond-> {:type :tool-result
+               :tool-use-id (:id block)
+               :content (if (and (map? result) (contains? result :tool-result))
+                          (:tool-result result)
+                          result)}
+        compact? (assoc :compact-before-next-turn true)))
     (catch Throwable e
       {:type :tool-result
        :tool-use-id (:id block)
@@ -1448,7 +1453,12 @@
               next-messages (conj messages
                                   {:role :assistant :content (:content response)}
                                   {:role :user :content results})
-              next-params (on-turn response (assoc params :messages next-messages))]
+              next-params (on-turn response (assoc params :messages next-messages))
+              next-params (if (some :compact-before-next-turn results)
+                            (-> next-params
+                                (dissoc :context-management)
+                                (assoc :compaction {:type :summarize}))
+                            next-params)]
           (recur (inc iterations)
                  next-params
                  (or (:messages next-params) next-messages)))
@@ -1463,6 +1473,9 @@
   Options include `:max-iterations`, `:on-message`, and `:on-turn`. `:on-turn`
   receives each assistant response and the current params, and returns params
   for the next iteration, allowing tools and request settings to change. Tool
+  functions may return `{:tool-result value :compact-before-next-turn true}` to
+  request a `{:type :summarize}` compaction turn after their result; this drops
+  `:context-management` from that request. Tool
   specs support response-inclusion, input-examples, eager-input-streaming,
   caching, and dated :version options."
   ([^AnthropicClient client params]
