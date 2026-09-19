@@ -5,6 +5,16 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-18
+
+### Added
+
+- Added compaction signaling for `run-beta-tools` handlers.
+- Added coverage for organization rate-limit group conversion.
+
+### Changed
+
+- Updated anthropic-java to 2.64.0
 
 ## [0.36.0] - 2026-09-16
 
