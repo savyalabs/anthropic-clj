@@ -1169,6 +1169,27 @@
             [{:type :tool-addition :tool {:reference "new-tool"}}]}]
            (second @seen)))))
 
+(deftest run-beta-tools-can-request-compaction-after-a-tool-result
+  (let [requests (atom [])
+        calls (atom 0)
+        params {:messages "start"
+                :context-management {:edits [{:type :compact-20260112}]}
+                :tools [{:name "weather" :input-schema {}
+                         :fn (fn [_] {:tool-result {:forecast "sunny"}
+                                      :compact-before-next-turn true})}]}
+        call-fn (fn [request]
+                  (swap! requests conj request)
+                  (if (= 1 (swap! calls inc))
+                    {:stop-reason :tool-use
+                     :content [{:type :tool-use :id "weather_1"
+                                :name "weather" :input {}}]}
+                    {:stop-reason :end-turn :content []}))]
+    (run-beta-tools* call-fn params {})
+    (is (= {:type :summarize} (:compaction (second @requests))))
+    (is (not (contains? (second @requests) :context-management)))
+    (is (= {:forecast "sunny"}
+           (get-in (second @requests) [:messages 2 :content 0 :content])))))
+
 (deftest beta-structured-output-parsing
   (is (= {:capital "Sacramento"}
          (parse-beta-text {:content [{:type :text

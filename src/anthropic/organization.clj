@@ -381,6 +381,28 @@
 
 ;; ---- Rate limits (organization) -------------------------------------------
 
+(defn- ->rate-limit-group
+  "Convert BetaOrganizationRateLimit$Group union to Clojure map."
+  [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit$Group group]
+  (when group
+    (let [group-type (kw<- (.asString (.type group)))]
+      (cond-> {:id (.id group) :type (name group-type)}
+        (.isModel group)
+        (assoc :display-name (.displayName ^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitModelGroup (.asModel group)))))))
+
+
+(defn- rate-limit->map
+  [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit r]
+  (cond-> {:id (.id r)
+           :group (->rate-limit-group (.group r))
+           :limits (mapv (fn [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitValue limit]
+                           {:type (.type limit)
+                            :value (.value limit)})
+                        (.limits r))}
+    (some? (unopt (.models r)))
+    (assoc :models (vec (unopt (.models r))))))
+
+
 (defn list-rate-limits
   "List organization rate limits. Options: `:limit`, `:page`, `:model`,
   `:group-type` (`:batch`/`:files`/`:model-group`/`:skills`/`:token-count`/
@@ -395,7 +417,7 @@
        (when group-type
          (.groupType b (com.anthropic.models.beta.organization.ratelimits.RateLimitListParams$GroupType/of
                         (->wire (check-enum! group-type group-types :group-type)))))
-       (mapv obj->clj (.autoPager (-> (.beta client) (.organization) (.rateLimits)
+       (mapv rate-limit->map (.autoPager (-> (.beta client) (.organization) (.rateLimits)
                                       (.list (.build b)))))))))
 
 ;; ---- Service accounts -----------------------------------------------------
@@ -681,6 +703,21 @@
       (obj->clj (-> (.beta client) (.organization) (.workspaces) (.members)
                     (.remove (.build b)))))))
 
+
+(defn- workspace-rate-limit->map
+  [^com.anthropic.models.beta.organization.workspaces.ratelimits.BetaWorkspaceRateLimit r]
+  (cond-> {:rate-limit-id (.rateLimitId r)
+           :workspace-id (.workspaceId r)
+           :group (->rate-limit-group (.group r))
+           :limits (mapv (fn [^com.anthropic.models.beta.organization.workspaces.ratelimits.BetaWorkspaceRateLimitValue limit]
+                           (cond-> {:type (.type limit)
+                                    :value (.value limit)}
+                             (some? (unopt (.orgLimit limit)))
+                             (assoc :org-limit (unopt (.orgLimit limit)))))
+                        (.limits r))}
+    (some? (unopt (.models r)))
+    (assoc :models (vec (unopt (.models r))))))
+
 ;; ---- Workspace rate limits ------------------------------------------------
 
 (defn list-workspace-rate-limits
@@ -696,7 +733,7 @@
        (when group-type
          (.groupType b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams$GroupType/of
                         (->wire (check-enum! group-type group-types :group-type)))))
-       (mapv obj->clj (.autoPager (-> (.beta client) (.organization) (.workspaces) (.rateLimits)
+       (mapv workspace-rate-limit->map (.autoPager (-> (.beta client) (.organization) (.workspaces) (.rateLimits)
                                       (.list (.build b)))))))))
 
 ;; ---- Workspace service accounts -------------------------------------------
