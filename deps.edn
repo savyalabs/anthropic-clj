@@ -8,7 +8,7 @@
  {:test
   {:extra-paths ["test"]
    :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                org.slf4j/slf4j-nop {:mvn/version "2.0.18"}
+                org.slf4j/slf4j-nop {:mvn/version "2.0.19"}
                 com.anthropic/anthropic-java-bedrock {:mvn/version "2.64.0"}
                 com.anthropic/anthropic-java-vertex {:mvn/version "2.64.0"}}
    :main-opts ["-m" "kaocha.runner"]}
