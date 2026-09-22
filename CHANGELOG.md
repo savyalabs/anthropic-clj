@@ -5,6 +5,22 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-22
+
+### Added
+
+- Support beta MCP tool-listing content blocks and definition-shaped dynamic
+  tool additions.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.65.0**.
+
+### Audit
+
+- The SDK response-closing and Bedrock-stream-close transport fix is internal;
+  the wrapper has no corresponding transport layer.
+
 ## [0.37.0] - 2026-09-18
 
 ### Added

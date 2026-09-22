@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.37.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.38.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.37.0"]
+[net.clojars.savya/anthropic-clj "0.38.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -55,7 +55,7 @@ Set `ANTHROPIC_API_KEY` in your environment, or pass client options:
 - `:configure` - receives the raw SDK builder last, for anything not wrapped
   here (interceptors, a custom `jsonMapper`, or a Bedrock/Vertex `backend`)
 
-Tracks [`com.anthropic/anthropic-java` 2.64.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.64.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 2.65.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.65.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -411,8 +411,9 @@ duplicate them as functions. For anything it does not wrap, use the
 
 ### Beta Messages
 
-`anthropic.beta.messages` supports fallback params, dynamic tool changes, and
-beta-only server tools. `run-beta-tools` accepts `:on-turn`. The library calls
+`anthropic.beta.messages` supports fallback params, dynamic tool changes, MCP
+tool-listing content blocks, and beta-only server tools. Tool additions accept
+`:definition` alongside reference forms. `run-beta-tools` accepts `:on-turn`. The library calls
 `:on-turn` with `(response params)` after each assistant turn. The params that
 `:on-turn` returns control the next iteration.
 

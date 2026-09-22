@@ -10,6 +10,7 @@
                                                BetaMessageTokensCount BetaCacheCreation BetaContainer MessageCountTokensParams
                                                MessageCreateParams BetaRawContentBlockDeltaEvent
                                                BetaRawMessageStreamEvent BetaStopReason BetaToolUnion
+                                               BetaMcpTool BetaMcpTool$InputSchema BetaMcpToolListingBlock
                                                MessageCountTokensParams$Tool)
            (com.anthropic.models.messages Tool ToolUnion)
            (com.anthropic.services.blocking.beta MessageService)
@@ -882,6 +883,73 @@
                                                    :cache-control {:ttl :1h}}))]
       (is (= expected-type (:type result)))
       (is (= expected-name (get-in result [:tool :name]))))))
+
+(deftest beta-tool-change-addition-accepts-tool-definitions
+  (let [body (try
+               (json-roundtrip
+                (->content-block
+                 {:type :tool-addition
+                  :tool {:definition {:name "get_weather"
+                                      :description "Get a forecast"
+                                      :input-schema {:type "object"
+                                                     :properties {:city {:type "string"}}
+                                                     :required ["city"]}}}}))
+               (catch clojure.lang.ExceptionInfo _ :unsupported))]
+    (is (= {:type "tool_addition"
+            :tool {:type "tool_definition"
+                   :definition {:name "get_weather"
+                                :description "Get a forecast"
+                                :input-schema {:type "object"
+                                               :properties {:city {:type "string"}}
+                                               :required ["city"]}}}}
+           body))))
+
+(deftest beta-mcp-tool-listing-round-trips-through-message-content
+  (let [content {:type :mcp-tool-listing
+                 :mcp-server-name "weather"
+                 :tools [{:name "get_weather"
+                          :description "Get a forecast"
+                          :input-schema {:type "object"
+                                         :properties {:city {:type "string"}}
+                                         :required ["city"]}}]}
+        request-body (try
+                       (let [params (->params {:messages [{:role :user
+                                                           :content [content]}]})]
+                         (json-roundtrip (._body params)))
+                       (catch clojure.lang.ExceptionInfo _ :unsupported))
+        response-block (let [schema (-> (BetaMcpTool$InputSchema/builder)
+                                         (.putAdditionalProperty "type" (JsonValue/from "object"))
+                                         (.putAdditionalProperty "properties"
+                                                                 (JsonValue/from {"city" {"type" "string"}}))
+                                         (.putAdditionalProperty "required" (JsonValue/from ["city"]))
+                                         (.build))
+                             tool (-> (BetaMcpTool/builder)
+                                      (.name "get_weather")
+                                      (.description "Get a forecast")
+                                      (.inputSchema schema)
+                                      (.build))]
+                         (-> (BetaMcpToolListingBlock/builder)
+                             (.mcpServerName "weather")
+                             (.addTool tool)
+                             (.build)))
+        response (beta-message->map (-> (beta-test-message "msg_listing")
+                                        (.toBuilder)
+                                        (.addContent response-block)
+                                        (.build)))]
+    (is (= [{:type "mcp_tool_listing"
+             :mcp-server-name "weather"
+             :tools [{:name "get_weather"
+                      :description "Get a forecast"
+                      :input-schema {:type "object"
+                                     :properties {:city {:type "string"}}
+                                     :required ["city"]}}]}]
+           (if (map? request-body)
+             (get-in request-body [:messages 0 :content])
+             request-body)))
+    (is (= [(-> content
+               (assoc-in [:tools 0 :input-schema :type] :object)
+               (assoc-in [:tools 0 :input-schema :properties :city :type] :string))]
+           (:content response)))))
 
 (deftest beta-fallback-request-params
   (let [explicit (->params {:messages [{:role :user :content "hi"}]

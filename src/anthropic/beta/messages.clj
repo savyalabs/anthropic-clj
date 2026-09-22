@@ -90,6 +90,8 @@
                                                BetaAdvisorTool20260301$Builder
                                                BetaMcpToolset BetaMcpToolset$Configs
                                                BetaMcpToolDefaultConfig
+                                               BetaMcpToolListingBlockParam
+                                               BetaMcpToolParam BetaMcpToolParam$InputSchema
                                                BetaBrowserToolset20260801
                                                BetaBrowserToolsetConfigs BetaBrowserToolsetConfigs$Builder
                                                BetaBrowserCloseTabConfig BetaBrowserDoubleClickConfig
@@ -265,8 +267,10 @@
       (.putAdditionalProperty b ^String (name k) (->json v)))
     (.build b)))
 
+(declare ->tool)
+
 (defn- add-tool-change
-  [^BetaRequestToolAdditionBlock$Builder b {:keys [reference mcp-tool-reference mcp-toolset-reference]}]
+  [^BetaRequestToolAdditionBlock$Builder b {:keys [reference mcp-tool-reference mcp-toolset-reference definition]}]
   (cond
     reference (.referenceTool b ^String reference)
     mcp-tool-reference
@@ -276,8 +280,19 @@
                (.serverName ^String (:server-name mcp-tool-reference))
                (.build)))
     mcp-toolset-reference (.mcpToolsetReferenceTool b ^String (:server-name mcp-toolset-reference))
+    definition (.definitionTool b ^BetaToolUnion (->tool definition))
     :else (throw (ex-info "Unsupported beta tool change reference"
                           {:anthropic/error :unsupported-tool-change-reference}))))
+
+(defn- ->mcp-tool-param ^BetaMcpToolParam [{:keys [name description input-schema]}]
+  (let [schema (BetaMcpToolParam$InputSchema/builder)
+        tool (-> (BetaMcpToolParam/builder)
+                 (.name ^String name))]
+    (doseq [[k v] input-schema]
+      (.putAdditionalProperty schema ^String (clojure.core/name k) (->json v)))
+    (.inputSchema tool (.build schema))
+    (when description (.description tool ^String description))
+    (.build tool)))
 
 (defn- remove-tool-change
   [^BetaRequestToolRemovalBlock$Builder b {:keys [reference mcp-tool-reference mcp-toolset-reference]}]
@@ -314,6 +329,12 @@
                 (when (contains? blk :citations)
                   (.citations b ^BetaCitationsConfigParam (->citations (:citations blk))))
                 (BetaContentBlockParam/ofDocument (.build b)))
+    :mcp-tool-listing
+    (let [b (-> (BetaMcpToolListingBlockParam/builder)
+                (.mcpServerName ^String (:mcp-server-name blk)))]
+      (doseq [tool (:tools blk)]
+        (.addTool b (->mcp-tool-param tool)))
+      (BetaContentBlockParam/ofMcpToolListing (.build b)))
     :thinking (BetaContentBlockParam/ofThinking
                (-> (BetaThinkingBlockParam/builder)
                    (.thinking ^String (:thinking blk))
