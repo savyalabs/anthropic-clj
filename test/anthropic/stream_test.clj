@@ -15,6 +15,15 @@
            s)))
      (close [_] (reset! closed? true)))))
 
+(defn- await-state
+  [predicate timeout-ms]
+  (let [deadline (+ (System/nanoTime) (* timeout-ms 1000000))]
+    (loop []
+      (cond
+        (predicate) true
+        (< (System/nanoTime) deadline) (do (Thread/sleep 10) (recur))
+        :else false))))
+
 (deftest cancellation-closes-response-and-stops-consumption
   (let [closed? (atom false)
         consumed (atom [])
@@ -54,7 +63,11 @@
                               nil
                               {:buffer-size 1})]
     (try
-      (Thread/sleep 100)
+      (is (await-state #(and (= 1 (.size ^java.util.concurrent.BlockingQueue (:queue handle)))
+                             (= [1 2] @consumed)
+                             (not (realized? @(:future handle))))
+                       5000)
+          "producer did not fill the queue and block within 5 seconds")
       (is (= 1 (.size ^java.util.concurrent.BlockingQueue (:queue handle))))
       (is (= [1 2] @consumed))
       (is (= ::still-running (deref @(:future handle) 50 ::still-running)))
