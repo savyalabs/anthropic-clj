@@ -117,7 +117,17 @@
 (def ->event-send-params #'beta/->event-send-params)
 (def session-event->map #'beta/session-event->map)
 (def send-session-events->map #'beta/send-session-events->map)
+(def ->event-list-params
+  #(when-let [v (ns-resolve 'anthropic.beta '->event-list-params)]
+     ((deref v) "sess_1" {:types [:agent-message :session-status-running]})))
 (def user-content->map #'beta/user-content->map)
+
+(deftest session-event-list-types-are-typed-enums
+  (let [params (->event-list-params)]
+    (is (some? params))
+    (when params
+      (is (= ["agent_message" "session_status_running"]
+             (mapv #(.asString %) (.orElse (.types params) [])))))))
 (def image-source->map #'beta/image-source->map)
 (def ->thread-retrieve-params #'beta/->thread-retrieve-params)
 (def ->thread-list-params #'beta/->thread-list-params)

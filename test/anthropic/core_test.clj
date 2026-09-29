@@ -133,10 +133,11 @@
 
 (deftest named-model-keywords
   (testing "public model aliases expose the verified SDK model ids"
-    (is (= 19 (count a/models)))
+    (is (= 20 (count a/models)))
     (is (= "claude-fable-5-1" (:claude-fable-5-1 a/models)))
     (is (= "claude-mythos-5-1" (:claude-mythos-5-1 a/models)))
     (is (= "claude-opus-5" (:claude-opus-5 a/models)))
+    (is (= "claude-sonnet-5-5" (:claude-sonnet-5-5 a/models)))
     (is (= "claude-opus-4-8" (:claude-opus-4-8 a/models))))
   (testing "a keyword model builds the same message params as its string id"
     (let [req {:max-tokens 512 :messages [{:role :user :content "hi"}]}
@@ -182,7 +183,16 @@
                                             :tool-choice {:type :tool :name "get_weather"}}))))))
   (testing "thinking :enabled with a budget"
     (is (some? (opt (.thinking (->params {:messages [{:role :user :content "hi"}]
-                                          :thinking {:type :enabled :budget-tokens 2048}})))))))
+                                          :thinking {:type :enabled :budget-tokens 2048}}))))))
+  (testing "thinking :between-tools"
+    (let [thinking (.get (.thinking (->params {:messages [{:role :user :content "hi"}]
+                                                :thinking {:type :between-tools}})))]
+      (is (.isBetweenTools thinking)))))
+
+(deftest message-diagnostics-request-translation
+  (let [params (->params {:messages [{:role :user :content "hi"}]
+                          :diagnostics {:previous-message-id "msg_previous"}})]
+    (is (= "msg_previous" (opt (.previousMessageId (opt (.diagnostics params))))))))
 
 (def web-fetch-tool-spec
   {:type :web-fetch :name "web-fetch"
@@ -1176,6 +1186,7 @@
               (.type (com.anthropic.core.JsonValue/from "message"))
               (.content [])
               (.usage (usage 1 2 nil nil))
+              (.diagnostics (java.util.Optional/empty))
               (.container (-> (Container/builder)
                               (.id "container_123")
                               (.expiresAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
@@ -1195,6 +1206,25 @@
     (is (= "END" (:stop-sequence mm)))
     (is (= {:category :cyber :explanation "blocked"} (:stop-details mm)))))
 
+(deftest message-diagnostics-response-conversion
+  (let [m (-> (Message/builder)
+              (.id "msg_1")
+              (.model "claude-haiku-4-5")
+              (.role (JsonValue/from "assistant"))
+              (.type (JsonValue/from "message"))
+              (.content [])
+              (.usage (usage 1 2 nil nil))
+              (.container (java.util.Optional/empty))
+              (.diagnostics (com.anthropic.models.messages.Diagnostics/of
+                             (com.anthropic.models.messages.CacheMissReason/ofModelChanged 7)))
+              (.stopDetails (java.util.Optional/empty))
+              (.stopReason (java.util.Optional/empty))
+              (.stopSequence (java.util.Optional/empty))
+              (.build))]
+    (is (= {:cache-miss-reason {:type :model-changed
+                                :cache-missed-input-tokens 7}}
+           (:diagnostics (message->map m))))))
+
 (deftest model-context-window-exceeded-stop-reason-round-trips
   (let [m (-> (Message/builder)
               (.id "msg_1")
@@ -1203,6 +1233,7 @@
               (.type (com.anthropic.core.JsonValue/from "message"))
               (.content [])
               (.usage (usage 1 2 nil nil))
+              (.diagnostics (java.util.Optional/empty))
               (.stopDetails (-> (RefusalStopDetails/builder)
                                 (.category RefusalStopDetails$Category/CYBER)
                                 (.explanation "blocked")
@@ -1457,6 +1488,7 @@
                       (.type (com.anthropic.core.JsonValue/from "message"))
                       (.content [])
                       (.usage (usage 3 0 nil nil))
+                      (.diagnostics empty-opt)
                       (.container empty-opt)
                       (.stopDetails empty-opt)
                       (.stopReason empty-opt)

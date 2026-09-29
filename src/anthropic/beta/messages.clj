@@ -58,6 +58,7 @@
                                                BetaTokenTaskBudget
                                                BetaThinkingBlockParam
                                                BetaThinkingConfigAdaptive
+                                               BetaThinkingConfigBetweenTools
                                                BetaThinkingConfigDisabled
                                                BetaThinkingConfigEnabled
                                                BetaThinkingConfigParam
@@ -416,6 +417,8 @@
     :enabled (BetaThinkingConfigParam/ofEnabled (->thinking-enabled thinking))
     :disabled (BetaThinkingConfigParam/ofDisabled (.build (BetaThinkingConfigDisabled/builder)))
     :adaptive (BetaThinkingConfigParam/ofAdaptive (->thinking-adaptive thinking))
+    :between-tools (BetaThinkingConfigParam/ofBetweenTools
+                    (.build (BetaThinkingConfigBetweenTools/builder)))
     (throw (ex-info "Unsupported thinking type"
                     {:anthropic/error :unsupported-thinking-type :type type}))))
 
@@ -941,7 +944,9 @@
     (when (:citations t) (invoke-method builder "citations" (->citations (:citations t))))
     (when-let [v (:response-inclusion t)]
       (when-let [response-class (try (Class/forName (str "com.anthropic.models.beta.messages." class-name "$ResponseInclusion")) (catch ClassNotFoundException _ nil))]
-        (when-let [response-method (first (filter #(= "of" (.getName ^java.lang.reflect.Method %)) (.getMethods ^Class response-class)))]
+        (when-let [response-method (first (filter #(and (= "of" (.getName ^java.lang.reflect.Method %))
+                                                        (= String (first (.getParameterTypes ^java.lang.reflect.Method %))))
+                                                (.getMethods ^Class response-class)))]
           (invoke-method builder "responseInclusion"
                          (.invoke ^java.lang.reflect.Method response-method nil (object-array [(name v)]))))))
     (when (str/starts-with? class-name "BetaWebFetchTool")

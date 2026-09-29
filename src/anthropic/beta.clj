@@ -2372,6 +2372,25 @@
     (send-session-events->map (-> (.beta client) (.sessions) (.events)
                                   (.send (->event-send-params session-id events))))))
 
+(defn- ->event-list-params
+  [session-id opts]
+  (let [b (com.anthropic.models.beta.sessions.events.EventListParams/builder)]
+    (.sessionId b ^String session-id)
+    (when (:created-at-gt opts) (.createdAtGt b (->offset-date-time (:created-at-gt opts))))
+    (when (:created-at-gte opts) (.createdAtGte b (->offset-date-time (:created-at-gte opts))))
+    (when (:created-at-lt opts) (.createdAtLt b (->offset-date-time (:created-at-lt opts))))
+    (when (:created-at-lte opts) (.createdAtLte b (->offset-date-time (:created-at-lte opts))))
+    (when (:limit opts) (.limit b (int (:limit opts))))
+    (when (:order opts) (.order b (com.anthropic.models.beta.sessions.events.EventListParams$Order/of
+                                   (if (keyword? (:order opts)) (name (:order opts)) (:order opts)))))
+    (when (:page opts) (.page b ^String (:page opts)))
+    (when (:types opts) (.types b ^java.util.List
+                                 (mapv #(com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionEventType/of
+                                         (-> % name (clojure.string/replace "-" "_")))
+                                       (:types opts))))
+    (doseq [beta (->beta-names (:betas opts))] (.addBeta b ^String beta))
+    (.build b)))
+
 (defn list-session-events
   "List session events (pages followed) as normalized event maps. Options include
   `:created-at-gt`, `:created-at-gte`, `:created-at-lt`, `:created-at-lte`, `:limit`,
@@ -2380,21 +2399,9 @@
    (list-session-events client session-id {}))
   ([^AnthropicClient client ^String session-id opts]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.sessions.events.EventListParams/builder)]
-      (.sessionId b ^String session-id)
-      (when (:created-at-gt opts) (.createdAtGt b (->offset-date-time (:created-at-gt opts))))
-      (when (:created-at-gte opts) (.createdAtGte b (->offset-date-time (:created-at-gte opts))))
-      (when (:created-at-lt opts) (.createdAtLt b (->offset-date-time (:created-at-lt opts))))
-      (when (:created-at-lte opts) (.createdAtLte b (->offset-date-time (:created-at-lte opts))))
-      (when (:limit opts) (.limit b (int (:limit opts))))
-      (when (:order opts) (.order b (com.anthropic.models.beta.sessions.events.EventListParams$Order/of
-                                     (if (keyword? (:order opts)) (name (:order opts)) (:order opts)))))
-      (when (:page opts) (.page b ^String (:page opts)))
-      (when (:types opts) (.types b ^java.util.List
-                                   (mapv #(if (keyword? %) (name %) %) (:types opts))))
-      (doseq [beta (->beta-names (:betas opts))] (.addBeta b ^String beta))
-      (let [^EventListPage p (-> (.beta client) (.sessions) (.events) (.list (.build b)))]
-        (mapv session-event->map (.autoPager p)))))))
+    (let [^EventListPage p (-> (.beta client) (.sessions) (.events)
+                               (.list (->event-list-params session-id opts)))]
+        (mapv session-event->map (.autoPager p))))))
 
 ;; ---- Event streams --------------------------------------------------------
 
@@ -4366,21 +4373,6 @@
    (list-session-events-lazy client session-id {}))
   ([^AnthropicClient client ^String session-id opts]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.sessions.events.EventListParams/builder)]
-       (.sessionId b ^String session-id)
-       (when (:created-at-gt opts) (.createdAtGt b (->offset-date-time (:created-at-gt opts))))
-       (when (:created-at-gte opts) (.createdAtGte b (->offset-date-time (:created-at-gte opts))))
-       (when (:created-at-lt opts) (.createdAtLt b (->offset-date-time (:created-at-lt opts))))
-       (when (:created-at-lte opts) (.createdAtLte b (->offset-date-time (:created-at-lte opts))))
-       (when (:limit opts) (.limit b (int (:limit opts))))
-       (when (:order opts)
-         (.order b (com.anthropic.models.beta.sessions.events.EventListParams$Order/of
-                    (if (keyword? (:order opts)) (name (:order opts)) (:order opts)))))
-       (when (:page opts) (.page b ^String (:page opts)))
-       (when (:types opts)
-         (.types b ^java.util.List
-                (mapv #(if (keyword? %) (name %) %) (:types opts))))
-       (doseq [beta (->beta-names (:betas opts))] (.addBeta b ^String beta))
        (let [^EventListPage p (-> (.beta client) (.sessions) (.events)
-                                  (.list (.build b)))]
-         (pagination/->lazy-pager session-event->map (.autoPager p)))))))
+                                  (.list (->event-list-params session-id opts)))]
+         (pagination/->lazy-pager session-event->map (.autoPager p))))))

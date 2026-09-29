@@ -713,28 +713,37 @@
                            (cond-> {:type (.type limit)
                                     :value (.value limit)}
                              (some? (unopt (.orgLimit limit)))
-                             (assoc :org-limit (unopt (.orgLimit limit)))))
+                             (assoc :org-limit (unopt (.orgLimit limit)))
+                             (some? (unopt (.source limit)))
+                             (assoc :source (obj->clj (unopt (.source limit))))))
                         (.limits r))}
     (some? (unopt (.models r)))
     (assoc :models (vec (unopt (.models r))))))
 
 ;; ---- Workspace rate limits ------------------------------------------------
 
+(defn- ->workspace-rate-limit-list-params
+  [workspace-id {:keys [limit page group-type include-inherited]}]
+  (let [b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams/builder)]
+    (.workspaceId b ^String workspace-id)
+    (when limit (.limit b (long limit)))
+    (when page (.page b ^String page))
+    (when (some? include-inherited) (.includeInherited b (boolean include-inherited)))
+    (when group-type
+      (.groupType b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams$GroupType/of
+                    (->wire (check-enum! group-type group-types :group-type)))))
+    (.build b)))
+
 (defn list-workspace-rate-limits
-  "List a workspace's rate limits. Options: `:limit`, `:page`, `:group-type`."
+  "List a workspace's rate limits. Options: `:limit`, `:page`, `:group-type`,
+  and `:include-inherited`."
   ([^AnthropicClient client ^String workspace-id]
    (list-workspace-rate-limits client workspace-id {}))
-  ([^AnthropicClient client ^String workspace-id {:keys [limit page group-type]}]
+  ([^AnthropicClient client ^String workspace-id opts]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams/builder)]
-       (.workspaceId b ^String workspace-id)
-       (when limit (.limit b (long limit)))
-       (when page (.page b ^String page))
-       (when group-type
-         (.groupType b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams$GroupType/of
-                        (->wire (check-enum! group-type group-types :group-type)))))
+     (let [params (->workspace-rate-limit-list-params workspace-id opts)]
        (mapv workspace-rate-limit->map (.autoPager (-> (.beta client) (.organization) (.workspaces) (.rateLimits)
-                                      (.list (.build b)))))))))
+                                      (.list params))))))))
 
 ;; ---- Workspace service accounts -------------------------------------------
 
