@@ -87,10 +87,11 @@
                                           TextBlock TextBlockParam TextCitation
                                           TextDelta
                                           ThinkingBlock ThinkingConfigAdaptive
+                                          ThinkingConfigBetweenTools
                                           ThinkingConfigDisabled
                                           ThinkingConfigEnabled
                                           ThinkingConfigParam ThinkingDelta
-                                          ThinkingBlockParam
+                                          ThinkingBlockParam DiagnosticsParam
                                           Tool Tool$AllowedCaller Tool$InputExample Tool$InputExample$Builder
                                           Tool$InputSchema Tool$InputSchema$Properties
                                           Tool$InputSchema$Properties$Builder Tool$InputSchema$Builder
@@ -156,6 +157,7 @@
   {:claude-fable-5-1 "claude-fable-5-1"
    :claude-mythos-5-1 "claude-mythos-5-1"
    :claude-opus-5 "claude-opus-5"
+   :claude-sonnet-5-5 "claude-sonnet-5-5"
    :claude-sonnet-5 "claude-sonnet-5"
    :claude-fable-5 "claude-fable-5"
    :claude-mythos-5 "claude-mythos-5"
@@ -1028,9 +1030,16 @@
                   (.budgetTokens (long budget-tokens)) (.build)))
     :disabled (ThinkingConfigParam/ofDisabled (.build (ThinkingConfigDisabled/builder)))
     :adaptive (ThinkingConfigParam/ofAdaptive (.build (ThinkingConfigAdaptive/builder)))
+    :between-tools (ThinkingConfigParam/ofBetweenTools
+                    (.build (ThinkingConfigBetweenTools/builder)))
     (throw (anthropic-error :unsupported-thinking-type
                             "Unsupported thinking type"
                             {:type type}))))
+
+(defn- ->diagnostics ^DiagnosticsParam [{:keys [previous-message-id]}]
+  (let [b (DiagnosticsParam/builder)]
+    (when previous-message-id (.previousMessageId b ^String previous-message-id))
+    (.build b)))
 
 (defn- ->tool-choice ^ToolChoice [tc]
   (if (map? tc)
@@ -1235,7 +1244,7 @@
   "Translate a request map into the SDK's MessageCreateParams."
   ^MessageCreateParams [{:keys [model max-tokens system messages tools
                                 temperature top-p top-k stop-sequences
-                                tool-choice thinking metadata service-tier
+                                tool-choice thinking metadata service-tier diagnostics
                                 response-format output-type effort container inference-geo
                                 user-profile-id cache-control extra-headers
                                 extra-query extra-body]
@@ -1253,6 +1262,7 @@
     (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when thinking (.thinking b (->thinking thinking)))
+    (when diagnostics (.diagnostics b (->diagnostics diagnostics)))
     (when metadata (.metadata b (->metadata metadata)))
     (when service-tier (.serviceTier b (->service-tier service-tier)))
     (when container
@@ -1506,11 +1516,15 @@
       (.isPresent cat) (assoc :category (->keyword (.get cat)))
       (.isPresent exp) (assoc :explanation (.get exp)))))
 
+(defn- diagnostics->map [diagnostics]
+  (normalize-content-data (json->clj (JsonValue/from diagnostics))))
+
 (defn- message->map [^Message m]
   (let [sr (.stopReason m)
         c (.container m)
         ss (.stopSequence m)
-        sd (.stopDetails m)]
+        sd (.stopDetails m)
+        diagnostics (.diagnostics m)]
     (cond-> {:id (.id m)
              :model (str (.model m))
              :role :assistant ; Messages API responses are always the assistant turn
@@ -1519,6 +1533,7 @@
              :usage (usage->map (.usage m))}
       (.isPresent c) (assoc :container (container->map (.get c)))
       (.isPresent ss) (assoc :stop-sequence (.get ss))
+      (.isPresent diagnostics) (assoc :diagnostics (diagnostics->map (.get diagnostics)))
       (.isPresent sd) (assoc :stop-details (stop-details->map (.get sd))))))
 
 (defn- parse-text

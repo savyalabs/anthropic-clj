@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-28
+
+### Added
+
+- Support `:between-tools` thinking configuration for stable and beta messages,
+  stable message diagnostics, inherited workspace-rate-limit filtering and rate
+  sources, typed Managed Agents event-list filters, and the
+  `:claude-sonnet-5-5` model alias.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.66.0**.
+
 ## [0.38.0] - 2026-09-22
 
 ### Added

@@ -20,6 +20,13 @@
   (let [v (ns-resolve 'anthropic.organization sym)]
     (when v @v)))
 
+(deftest workspace-rate-limit-list-params-support-inherited-rates
+  (let [build-params (private-fn '->workspace-rate-limit-list-params)]
+    (is (some? build-params))
+    (when build-params
+      (let [params (build-params "ws_1" {:include-inherited true})]
+        (is (true? (.orElse (.includeInherited params) false)))))))
+
 (deftest compliance-settings-conversion
   (let [->params (private-fn '->compliance-update-params)
         convert (private-fn 'compliance-settings->map)

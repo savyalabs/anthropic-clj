@@ -42,6 +42,11 @@
            (.asString (.get (.prefixMismatchBehavior (.get (.blockBinding (.asAdaptive thinking))))))))
   ))
 
+(deftest beta-thinking-between-tools
+  (let [thinking (.get (.thinking (->params {:messages [{:role :user :content "hi"}]
+                                              :thinking {:type :between-tools}})))]
+    (is (.isBetweenTools thinking))))
+
 (deftest beta-message-param-new-fields
   (let [p (-> (com.anthropic.models.beta.messages.BetaMessageParam/builder)
               (.content "hello")
