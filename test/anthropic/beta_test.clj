@@ -21,8 +21,17 @@
            (com.anthropic.models.beta.sessions.events BetaManagedAgentsEventParams
                                                        BetaManagedAgentsAgentMessageEvent
                                                        BetaManagedAgentsAgentMessageEvent$Type
+                                                       BetaManagedAgentsRepositoryCloneError
+                                                       BetaManagedAgentsRepositoryNotFoundError
+                                                       BetaManagedAgentsRetryStatusTerminal
+                                                       BetaManagedAgentsSessionErrorEvent
+                                                       BetaManagedAgentsSessionErrorEvent$Type
                                                        BetaManagedAgentsSendSessionEvents
                                                        BetaManagedAgentsSessionEvent
+                                                       BetaManagedAgentsSessionRefusal
+                                                       BetaManagedAgentsSessionRefusalStopDetails
+                                                       BetaManagedAgentsSessionStatusIdleEvent
+                                                       BetaManagedAgentsSessionStatusIdleEvent$Type
                                                        BetaManagedAgentsStreamSessionEvents
                                                        BetaManagedAgentsUserMessageEvent
                                                        EventSendParams)
@@ -496,6 +505,91 @@
             :created-at "2026-07-04T00:00Z" :type :tunnel}
            (tunnel->map r)))))
 
+(deftest session-idle-refusal-stop-reason-is-normalized
+  (let [details (-> (BetaManagedAgentsSessionRefusalStopDetails/builder)
+                    (.category (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionRefusalStopDetails$Category/of "cyber"))
+                    (.explanation "refused")
+                    (.type (JsonValue/from "refusal"))
+                    (.build))
+        event (-> (BetaManagedAgentsSessionStatusIdleEvent/builder)
+                  (.id "evt_idle")
+                  (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
+                  (.stopReason
+                   (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionStatusIdleEvent$StopReason/ofRefusal
+                    (-> (BetaManagedAgentsSessionRefusal/builder)
+                        (.type (JsonValue/from "refusal"))
+                        (.build))))
+                  (.stopDetails details)
+                  (.type (BetaManagedAgentsSessionStatusIdleEvent$Type/of "session_status_idle"))
+                  (.build))]
+    (is (= :refusal
+           (:stop-reason (session-event->map
+                          (BetaManagedAgentsSessionEvent/ofSessionStatusIdle event)))))))
+
+(deftest session-idle-refusal-stop-details-are-normalized
+  (let [details (-> (BetaManagedAgentsSessionRefusalStopDetails/builder)
+                    (.category (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionRefusalStopDetails$Category/of "cyber"))
+                    (.explanation "Cannot help with that")
+                    (.type (JsonValue/from "refusal"))
+                    (.build))
+        event (-> (BetaManagedAgentsSessionStatusIdleEvent/builder)
+                  (.id "evt_idle")
+                  (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
+                  (.stopReason
+                   (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionStatusIdleEvent$StopReason/ofRefusal
+                    (-> (BetaManagedAgentsSessionRefusal/builder)
+                        (.type (JsonValue/from "refusal"))
+                        (.build))))
+                  (.stopDetails details)
+                  (.type (BetaManagedAgentsSessionStatusIdleEvent$Type/of "session_status_idle"))
+                  (.build))]
+    (is (= {:type :refusal :category :cyber :explanation "Cannot help with that"}
+           (:stop-details (session-event->map
+                           (BetaManagedAgentsSessionEvent/ofSessionStatusIdle event)))))))
+
+(deftest session-repository-errors-are-normalized
+  (let [repository-error (-> (BetaManagedAgentsRepositoryCloneError/builder)
+                             (.message "clone failed")
+                             (.repositoryUrl "https://example.test/repo.git")
+                             (.retryStatus
+                              (-> (BetaManagedAgentsRetryStatusTerminal/builder)
+                                  (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsRetryStatusTerminal$Type/of "terminal"))
+                                  (.build)))
+                             (.type (JsonValue/from "repository_clone"))
+                             (.build))
+        event (-> (BetaManagedAgentsSessionErrorEvent/builder)
+                  (.id "evt_error")
+                  (.error repository-error)
+                  (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
+                  (.type (BetaManagedAgentsSessionErrorEvent$Type/of "session_error"))
+                  (.build))]
+    (is (= {:type :repository-clone-error
+            :message "clone failed"
+            :repository-url "https://example.test/repo.git"
+            :retry-status :terminal}
+           (:error (session-event->map
+                    (BetaManagedAgentsSessionEvent/ofSessionError event)))))))
+
+(deftest session-repository-not-found-error-is-a-keyworded-map
+  (let [repository-error (-> (BetaManagedAgentsRepositoryNotFoundError/builder)
+                             (.message "repository missing")
+                             (.repositoryUrl "https://example.test/missing.git")
+                             (.retryStatus
+                              (-> (BetaManagedAgentsRetryStatusTerminal/builder)
+                                  (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsRetryStatusTerminal$Type/of "terminal"))
+                                  (.build)))
+                             (.type (JsonValue/from "repository_not_found"))
+                             (.build))
+        event (-> (BetaManagedAgentsSessionErrorEvent/builder)
+                  (.id "evt_missing") (.error repository-error)
+                  (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
+                  (.type (BetaManagedAgentsSessionErrorEvent$Type/of "session_error"))
+                  (.build))]
+    (is (= :repository-not-found-error
+           (get-in (session-event->map
+                    (BetaManagedAgentsSessionEvent/ofSessionError event))
+                   [:error :type])))))
+
 (deftest agent-version-params
   (let [p (->agent-version-list-params "agent_1" {:limit 10 :page "next"})]
     (is (= "agent_1" (opt (.agentId p))))
@@ -620,7 +714,11 @@
                                     "ms_1" {:name "renamed"})]
     (is (= "renamed" (opt (.name p)))))
   (is (= {:anthropic/error :missing-key :key :name}
-         (ex-data-for #(->memory-store-create-params {})))))
+         (ex-data-for #(->memory-store-create-params {}))))
+  (is (= {:anthropic/error :missing-key :key :description}
+         (ex-data-for #(->memory-store-create-params {:name "notes"}))))
+  (is (= {:anthropic/error :missing-key :key :metadata}
+         (ex-data-for #(->memory-store-create-params {:name "notes" :description "d"})))))
 
 (deftest agent-params
   (let [^AgentCreateParams p (->agent-create-params
@@ -1328,7 +1426,9 @@
               (.id "ms_1")
               (.name "notes")
               (.description "d")
+              (.metadata (.build (com.anthropic.models.beta.memorystores.BetaManagedAgentsMemoryStore$Metadata/builder)))
               (.type (com.anthropic.core.JsonValue/from "memory_store"))
+              (.archivedAt ts)
               (.createdAt ts)
               (.updatedAt ts)
               (.build))
@@ -1336,7 +1436,8 @@
     (is (= "ms_1" (:id m)))
     (is (= "notes" (:name m)))
     (is (= :memory-store (:type m)))
-    (is (= "d" (:description m)))))
+    (is (= "d" (:description m)))
+    (is (= "2026-07-04T00:00Z" (:archived-at m)))))
 
 (deftest agent-response-mapping
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")

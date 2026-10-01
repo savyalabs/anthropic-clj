@@ -1,11 +1,12 @@
 (ns anthropic.organization
-  "Clojure wrappers over the beta Organization administration APIs of the
+  "Clojure wrappers over the GA Organization API and beta-only administration APIs of the
   official Anthropic Java SDK: the organization itself plus users, API keys,
   external keys, invites, rate limits, service accounts, workspaces, workspace
   members/rate-limits/service-accounts, and identity federation (issuers, rules,
   and rule workspaces).
 
-  These wrap beta endpoints that Anthropic may change. Build a request as a
+  GA operations use the stable client path; beta-only administration operations
+  remain under the beta client. Build a request as a
   Clojure map, get a Clojure map back. Errors follow `anthropic.core`'s
   contract: API/IO failures are ex-info keyed `:anthropic/error` with the SDK
   exception as cause.
@@ -21,8 +22,8 @@
   (:import (com.anthropic.client AnthropicClient)
            (com.anthropic.core JsonValue)
            (com.anthropic.errors AnthropicException)
-           (com.anthropic.models.beta.organization.compliancesettings
-                                             BetaComplianceSettings
+           (com.anthropic.models.organization.compliancesettings
+                                             OrganizationComplianceSettings
                                              ComplianceSettingUpdateParams)
            (java.util Optional)))
 
@@ -47,10 +48,52 @@
 (defn- unopt [^Optional o]
   (when (and o (.isPresent o)) (.get o)))
 
+(declare enum-keywords kw<-)
+
+(defn- enum-keywords
+  "Replace SDK enum values with idiomatic keywords while retaining the SDK's
+  JSON-shaped maps.  Generated model classes expose their fields as accessors,
+  so walking those accessors lets us distinguish an enum from an ordinary
+  string such as an id or a display name."
+  [o value]
+  (cond
+    (instance? com.anthropic.core.Enum o)
+    (kw<- (clojure.lang.Reflector/invokeInstanceMethod o "asString" (object-array 0)))
+    (instance? Optional o) (when (.isPresent ^Optional o)
+                            (enum-keywords (.get ^Optional o) value))
+    (instance? java.util.List o) (mapv enum-keywords o value)
+    (and (some? o) (map? value)
+         (.startsWith (.getName (class o)) "com.anthropic.models."))
+    (reduce (fn [m ^java.lang.reflect.Method method]
+              (let [name (.getName method)
+                    key (-> name
+                            (str/replace #"([a-z])([A-Z])" "$1-$2")
+                            str/lower-case
+                            keyword)]
+                (if (and (zero? (alength (.getParameterTypes method)))
+                         (contains? m key)
+                         (not (str/starts-with? name "_")))
+                  (assoc m key (enum-keywords (.invoke method o (object-array 0))
+                                               (get m key)))
+                  m)))
+            value (.getMethods (class o)))
+    :else value))
+
+(defn- kebab-keys [value]
+  (cond
+    (map? value) (into {}
+                        (map (fn [[k v]]
+                               [(-> k name (str/replace "_" "-") keyword)
+                                (kebab-keys v)]))
+                        value)
+    (sequential? value) (mapv kebab-keys value)
+    :else value))
+
 (defn- obj->clj
   "Full-fidelity Clojure data for any SDK model object, via its JSON form."
   [^Object o]
-  (when (some? o) (json->clj (JsonValue/from o))))
+  (when (some? o)
+    (enum-keywords o (kebab-keys (json->clj (JsonValue/from o))))))
 
 (defn- kw<-
   "Wire enum string -> kebab keyword. Call sites type-hint the concrete enum
@@ -84,77 +127,209 @@
 (def ^:private group-types #{:batch :files :model-group :skills :token-count :web-search})
 (def ^:private geos #{:us})
 
+;; The beta-only administration APIs share a large, rapidly growing family of
+;; generated parameter objects. These helpers preserve the library's map-in /
+;; map-out contract while delegating field validation to the SDK builders.
+(defn- dynamic-call [target method & args]
+  (clojure.lang.Reflector/invokeInstanceMethod target method (to-array args)))
+
+(defn- accepts-args?
+  "True when every arg is an instance of the matching (boxed) parameter type."
+  [^java.lang.reflect.Method m args]
+  (every? (fn [[^Class t a]]
+            (cond
+              (nil? a) (not (.isPrimitive t))
+              (= t Boolean/TYPE) (boolean? a)
+              (.isPrimitive t) (number? a)
+              :else (instance? t a)))
+          (map vector (.getParameterTypes m) args)))
+
+(defn- dynamic-static-call
+  "Invoke the static `method` on `target` whose parameter types accept `args`.
+  `getMethods` order is unspecified, so overloads (e.g. several one-arg `of`)
+  must be chosen by type, not position."
+  [^Class target method & args]
+  (let [arity-matches (filter #(and (= method (.getName ^java.lang.reflect.Method %))
+                                    (= (count args) (alength (.getParameterTypes ^java.lang.reflect.Method %))))
+                              (.getMethods target))
+        ^java.lang.reflect.Method m (or (first (filter #(accepts-args? % args) arity-matches))
+                                        (first arity-matches))]
+    (.invoke m nil (object-array args))))
+
+(defn- camel-key [k]
+  (let [[head & tail] (str/split (name k) #"-")]
+    (apply str head (map str/capitalize tail))))
+
+(defn- type-class [^java.lang.reflect.Type type]
+  (cond
+    (instance? Class type) type
+    (instance? java.lang.reflect.ParameterizedType type)
+    (let [raw (.getRawType ^java.lang.reflect.ParameterizedType type)]
+      (when (instance? Class raw) raw))))
+
+(defn- sdk-enum
+  "Resolve a keyword or string to an instance of the SDK enum class `target`.
+  Known constants match either their wire value or their Java constant name
+  (so `:0-200k` and `:from-0-to-200k` both resolve to `FROM_0_TO_200K`, whose
+  wire value is `0-200k`). Unknown values fall back to `of` with the
+  lower_snake wire form, preserving forward compatibility."
+  [^Class target value]
+  (let [wanted (->keyword (name value))
+        known (for [^java.lang.reflect.Field f (.getFields target)
+                    :when (and (java.lang.reflect.Modifier/isStatic (.getModifiers f))
+                               (= target (.getType f)))]
+                [f (.get f nil)])]
+    (or (some (fn [[^java.lang.reflect.Field f e]]
+                (when (or (= wanted (->keyword (.getName f)))
+                          (= wanted (->keyword (str (dynamic-call e "asString")))))
+                  e))
+              known)
+        (dynamic-static-call target "of" (->wire value)))))
+
+(defn- dynamic-value [^Class target generic-type value]
+  (cond
+    (nil? value) nil
+    (and (.isAssignableFrom com.anthropic.core.Enum target)
+         (or (keyword? value) (string? value)))
+    (sdk-enum target value)
+    (= target String) (str value)
+    (or (= target Long/TYPE) (= target Long)) (long value)
+    (or (= target Integer/TYPE) (= target Integer)) (int value)
+    (or (= target Boolean/TYPE) (= target Boolean)) (boolean value)
+    (= target java.time.LocalDate) (if (instance? java.time.LocalDate value)
+                                      value (java.time.LocalDate/parse (str value)))
+    (= target java.time.OffsetDateTime) (if (instance? java.time.OffsetDateTime value)
+                                           value (java.time.OffsetDateTime/parse (str value)))
+    (.isAssignableFrom java.util.List target)
+    (let [element-type (when (instance? java.lang.reflect.ParameterizedType generic-type)
+                         (type-class (first (.getActualTypeArguments
+                                             ^java.lang.reflect.ParameterizedType generic-type))))]
+      (mapv #(dynamic-value (or element-type Object) nil %) value))
+    ;; Non-enum SDK value types: keywords go to the wire form, but strings
+    ;; (ids, URLs, free text) are handed over untouched.
+    (or (keyword? value) (string? value))
+    (try (dynamic-static-call target "of" (if (keyword? value) (->wire value) value))
+         (catch Throwable _ value))
+    :else value))
+
+(def ^:private wrapper-param-types
+  #{java.util.Optional com.anthropic.core.JsonField JsonValue com.anthropic.core.MultipartField})
+
+(defn- builder-setter
+  "Pick the builder overload for `method-name` that should receive `value`.
+  Optional overloads are never used. Plain-typed overloads beat the raw
+  JsonField/JsonValue/MultipartField ones (which would otherwise receive an
+  unconverted or wire-mangled value), and among plain overloads one that
+  already accepts `value` as-is (e.g. InputStream vs byte[] vs Path) wins."
+  ^java.lang.reflect.Method [builder method-name value]
+  (let [param-type (fn [^java.lang.reflect.Method m] (aget (.getParameterTypes m) 0))
+        candidates (filter #(and (= method-name (.getName ^java.lang.reflect.Method %))
+                                 (= 1 (alength (.getParameterTypes ^java.lang.reflect.Method %)))
+                                 (not= java.util.Optional (param-type %)))
+                           (.getMethods (class builder)))
+        plain (remove #(contains? wrapper-param-types (param-type %)) candidates)]
+    (or (first (filter #(instance? (param-type %) value) plain))
+        (first plain)
+        (first candidates))))
+
+(defn- ->dynamic-params [class-name opts]
+  (let [^Class param-class (Class/forName class-name)
+        builder (dynamic-static-call param-class "builder")]
+    (doseq [[key value] opts :when (some? value)]
+      (let [method (builder-setter builder (camel-key key) value)]
+        (when-not method
+          (throw (ex-info (str "Unknown option " key " for " class-name)
+                          {:anthropic/error :invalid-option :key key})))
+        (try
+          (.invoke method builder
+                   (object-array
+                    [(dynamic-value (aget (.getParameterTypes method) 0)
+                                    (aget (.getGenericParameterTypes method) 0)
+                                    value)]))
+          (catch java.lang.reflect.InvocationTargetException e
+            (throw (or (.getCause e) e))))))
+    (dynamic-call builder "build")))
+
+(defn- beta-organization [^AnthropicClient client]
+  (-> (.beta client) (.organization)))
+
+(defn- dynamic-list [service params]
+  (let [page (dynamic-call service "list" params)
+        pager (dynamic-call page "autoPager")]
+    (mapv obj->clj (iterator-seq (dynamic-call pager "iterator")))))
+
 ;; ---- Organization ---------------------------------------------------------
 
-(defn- organization->map [^com.anthropic.models.beta.organization.BetaOrganization r]
-  {:id (.id r) :name (.name r)})
+(defn- organization->map [r]
+  (let [m (obj->clj r)]
+    {:id (:id m) :name (:name m)}))
 
 (defn get-organization
   "Retrieve the caller's organization, as `{:id ... :name ...}`."
   [^AnthropicClient client]
   (with-api-errors
-    (organization->map (-> (.beta client) (.organization) (.retrieve)))))
+    (organization->map (-> (.organization client) (.retrieve)))))
 
 ;; ---- Compliance settings --------------------------------------------------
 
 (defn- ->compliance-state [state]
   (case (check-enum! state #{:enabled :disabled} :state)
-    :enabled (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateParam/ofEnabled
-              (.build (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateEnabledParam/builder)))
-    :disabled (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateParam/ofDisabled
-               (.build (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateDisabledParam/builder)))))
+    :enabled (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateParam/ofEnabled
+              (.build (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateEnabledParam/builder)))
+    :disabled (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateParam/ofDisabled
+               (.build (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateDisabledParam/builder)))))
 
 (defn- ->compliance-update-params ^ComplianceSettingUpdateParams [{:keys [state]}]
   (when-not state (missing-key! :state))
   (let [b (ComplianceSettingUpdateParams/builder)
-        ^com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateParam state-value
+        ^com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateParam state-value
         (->compliance-state state)]
     (.state b state-value)
     (.build b)))
 
-(defn- compliance-settings->map [^BetaComplianceSettings settings]
+(defn- compliance-settings->map [^OrganizationComplianceSettings settings]
   {:state (kw<- (.asString (.type (.state settings))))})
 
 (defn get-compliance-settings
   "Retrieve organization compliance settings as `{:state :enabled|:disabled}`."
   [^AnthropicClient client]
   (with-api-errors
-    (compliance-settings->map (-> (.beta client) (.organization)
+    (compliance-settings->map (-> (.organization client)
                                   (.complianceSettings) (.retrieve)))))
 
 (defn update-compliance-settings
   "Update organization compliance settings with `{:state :enabled|:disabled}`."
   [^AnthropicClient client changes]
   (with-api-errors
-    (compliance-settings->map (-> (.beta client) (.organization)
+    (compliance-settings->map (-> (.organization client)
                                   (.complianceSettings)
                                   (.update (->compliance-update-params changes))))))
 
 ;; ---- Users ----------------------------------------------------------------
 
-(defn- org-user->map [^com.anthropic.models.beta.organization.users.BetaOrganizationUser r]
+(defn- org-user->map [^com.anthropic.models.organization.users.OrganizationUser r]
   {:id (.id r)
    :added-at (str (.addedAt r))
    :email (.email r)
    :name (.name r)
-   :role (kw<- (.asString ^com.anthropic.models.beta.organization.BetaOrganizationRole (.role r)))})
+   :role (kw<- (.asString ^com.anthropic.models.organization.OrganizationRole (.role r)))})
 
 (defn get-org-user
   "Retrieve one organization user by id."
   [^AnthropicClient client ^String user-id]
   (with-api-errors
-    (org-user->map (-> (.beta client) (.organization) (.users) (.retrieve user-id)))))
+    (org-user->map (-> (.organization client) (.users) (.retrieve user-id)))))
 
 (defn update-org-user
   "Update an organization user's `:role` (one of the organization roles)."
   [^AnthropicClient client ^String user-id {:keys [role]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.users.UserUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.users.UserUpdateParams/builder)]
       (.userId b ^String user-id)
       (when role
-        (.role b (com.anthropic.models.beta.organization.users.UserUpdateParams$Role/of
+        (.role b (com.anthropic.models.organization.users.UserUpdateParams$Role/of
                   (->wire (check-enum! role user-roles :role)))))
-      (org-user->map (-> (.beta client) (.organization) (.users) (.update (.build b)))))))
+      (org-user->map (-> (.organization client) (.users) (.update (.build b)))))))
 
 (defn list-org-users
   "List organization users. Options: `:limit`, `:after-id`, `:before-id`,
@@ -162,20 +337,20 @@
   ([^AnthropicClient client] (list-org-users client {}))
   ([^AnthropicClient client {:keys [limit after-id before-id email roles]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.users.UserListParams/builder)]
+     (let [b (com.anthropic.models.organization.users.UserListParams/builder)]
        (when limit (.limit b (long limit)))
        (when after-id (.afterId b ^String after-id))
        (when before-id (.beforeId b ^String before-id))
        (when email (.email b ^String email))
        (when (seq roles) (.roles b ^java.util.List (mapv str roles)))
-       (mapv org-user->map (.autoPager (-> (.beta client) (.organization) (.users)
+       (mapv org-user->map (.autoPager (-> (.organization client) (.users)
                                            (.list (.build b)))))))))
 
 (defn remove-org-user
   "Remove a user from the organization. Returns the removal response as a map."
   [^AnthropicClient client ^String user-id]
   (with-api-errors
-    (obj->clj (-> (.beta client) (.organization) (.users) (.remove user-id)))))
+    (obj->clj (-> (.organization client) (.users) (.remove user-id)))))
 
 ;; ---- API keys -------------------------------------------------------------
 
@@ -233,7 +408,7 @@
 
 ;; ---- External keys --------------------------------------------------------
 
-(defn- external-key->map [^com.anthropic.models.beta.organization.externalkeys.BetaExternalKey r]
+(defn- external-key->map [^com.anthropic.models.organization.externalkeys.ExternalKey r]
   {:id (.id r)
    :attachment (obj->clj (.attachment r))
    :created-at (str (.createdAt r))
@@ -249,25 +424,25 @@
   `:geo` (`:us`)."
   [^AnthropicClient client {:keys [display-name geo aws-provider-config gcp-provider-config provider-config]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyCreateParams/builder)]
+    (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyCreateParams/builder)]
       (cond
         aws-provider-config (.awsProviderConfig b ^String aws-provider-config)
         gcp-provider-config (.gcpProviderConfig b ^String gcp-provider-config)
-        provider-config (.providerConfig b ^com.anthropic.models.beta.organization.externalkeys.ExternalKeyCreateParams$ProviderConfig provider-config))
+        provider-config (.providerConfig b ^com.anthropic.models.organization.externalkeys.ExternalKeyCreateParams$ProviderConfig provider-config))
       (when display-name (.displayName b ^String display-name))
       (when geo
-        (.geo b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyCreateParams$Geo/of
+        (.geo b (com.anthropic.models.organization.externalkeys.ExternalKeyCreateParams$Geo/of
                  (->wire (check-enum! geo geos :geo)))))
-      (external-key->map (-> (.beta client) (.organization) (.externalKeys)
+      (external-key->map (-> (.organization client) (.externalKeys)
                              (.create (.build b)))))))
 
 (defn get-external-key
   "Retrieve one external key by id."
   [^AnthropicClient client ^String external-key-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyRetrieveParams/builder)]
       (.externalKeyId b ^String external-key-id)
-      (external-key->map (-> (.beta client) (.organization) (.externalKeys)
+      (external-key->map (-> (.organization client) (.externalKeys)
                              (.retrieve (.build b)))))))
 
 (defn update-external-key
@@ -276,17 +451,17 @@
   [^AnthropicClient client ^String external-key-id
    {:keys [display-name geo aws-provider-config gcp-provider-config provider-config]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyUpdateParams/builder)]
       (.externalKeyId b ^String external-key-id)
       (cond
         aws-provider-config (.awsProviderConfig b ^String aws-provider-config)
         gcp-provider-config (.gcpProviderConfig b ^String gcp-provider-config)
-        provider-config (.providerConfig b ^com.anthropic.models.beta.organization.externalkeys.ExternalKeyUpdateParams$ProviderConfig provider-config))
+        provider-config (.providerConfig b ^com.anthropic.models.organization.externalkeys.ExternalKeyUpdateParams$ProviderConfig provider-config))
       (when display-name (.displayName b ^String display-name))
       (when geo
-        (.geo b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyUpdateParams$Geo/of
+        (.geo b (com.anthropic.models.organization.externalkeys.ExternalKeyUpdateParams$Geo/of
                  (->wire (check-enum! geo geos :geo)))))
-      (external-key->map (-> (.beta client) (.organization) (.externalKeys)
+      (external-key->map (-> (.organization client) (.externalKeys)
                              (.update (.build b)))))))
 
 (defn list-external-keys
@@ -294,39 +469,39 @@
   ([^AnthropicClient client] (list-external-keys client {}))
   ([^AnthropicClient client {:keys [limit page]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyListParams/builder)]
+     (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyListParams/builder)]
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
-       (mapv external-key->map (.autoPager (-> (.beta client) (.organization) (.externalKeys)
+       (mapv external-key->map (.autoPager (-> (.organization client) (.externalKeys)
                                                (.list (.build b)))))))))
 
 (defn delete-external-key
   "Delete an external key by id. Returns the delete response as a map."
   [^AnthropicClient client ^String external-key-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyDeleteParams/builder)]
+    (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyDeleteParams/builder)]
       (.externalKeyId b ^String external-key-id)
-      (obj->clj (-> (.beta client) (.organization) (.externalKeys) (.delete (.build b)))))))
+      (obj->clj (-> (.organization client) (.externalKeys) (.delete (.build b)))))))
 
 (defn validate-external-key
   "Validate an external key by id. Returns the validation response as a map."
   [^AnthropicClient client ^String external-key-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.externalkeys.ExternalKeyValidateParams/builder)]
+    (let [b (com.anthropic.models.organization.externalkeys.ExternalKeyValidateParams/builder)]
       (.externalKeyId b ^String external-key-id)
-      (obj->clj (-> (.beta client) (.organization) (.externalKeys) (.validate (.build b)))))))
+      (obj->clj (-> (.organization client) (.externalKeys) (.validate (.build b)))))))
 
 ;; ---- Invites --------------------------------------------------------------
 
-(defn- invite->map [^com.anthropic.models.beta.organization.invites.BetaOrganizationInvite r]
+(defn- invite->map [^com.anthropic.models.organization.invites.OrganizationInvite r]
   {:id (.id r)
    :accepted-at (some-> (.acceptedAt r) unopt str)
    :email (.email r)
    :expires-at (str (.expiresAt r))
    :invited-at (str (.invitedAt r))
    :rbac-group-ids (vec (.rbacGroupIds r))
-   :role (kw<- (.asString ^com.anthropic.models.beta.organization.BetaOrganizationRole (.role r)))
-   :status (kw<- (.asString ^com.anthropic.models.beta.organization.invites.BetaOrganizationInvite$Status (.status r)))})
+   :role (kw<- (.asString ^com.anthropic.models.organization.OrganizationRole (.role r)))
+   :status (kw<- (.asString ^com.anthropic.models.organization.invites.OrganizationInvite$Status (.status r)))})
 
 (defn create-invite
   "Create an organization invite. Requires `:email` and `:role` (one of the
@@ -335,20 +510,20 @@
   (with-api-errors
     (when-not email (missing-key! :email))
     (when-not role (missing-key! :role))
-    (let [b (com.anthropic.models.beta.organization.invites.InviteCreateParams/builder)]
+    (let [b (com.anthropic.models.organization.invites.InviteCreateParams/builder)]
       (.email b ^String email)
-      (.role b (com.anthropic.models.beta.organization.invites.InviteCreateParams$Role/of
+      (.role b (com.anthropic.models.organization.invites.InviteCreateParams$Role/of
                 (->wire (check-enum! role invite-roles :role))))
       (when (seq rbac-group-ids) (.rbacGroupIds b ^java.util.List (mapv str rbac-group-ids)))
-      (invite->map (-> (.beta client) (.organization) (.invites) (.create (.build b)))))))
+      (invite->map (-> (.organization client) (.invites) (.create (.build b)))))))
 
 (defn get-invite
   "Retrieve one invite by id."
   [^AnthropicClient client ^String invite-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.invites.InviteRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.invites.InviteRetrieveParams/builder)]
       (.inviteId b ^String invite-id)
-      (invite->map (-> (.beta client) (.organization) (.invites) (.retrieve (.build b)))))))
+      (invite->map (-> (.organization client) (.invites) (.retrieve (.build b)))))))
 
 (defn list-invites
   "List invites. Options: `:limit`, `:after-id`, `:before-id`, `:email`,
@@ -357,7 +532,7 @@
   ([^AnthropicClient client] (list-invites client {}))
   ([^AnthropicClient client {:keys [limit after-id before-id email roles statuses]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.invites.InviteListParams/builder)]
+     (let [b (com.anthropic.models.organization.invites.InviteListParams/builder)]
        (when limit (.limit b (long limit)))
        (when after-id (.afterId b ^String after-id))
        (when before-id (.beforeId b ^String before-id))
@@ -365,37 +540,37 @@
        (when (seq roles) (.roles b ^java.util.List (mapv str roles)))
        (when (seq statuses)
          (.statuses b ^java.util.List
-                    (mapv #(com.anthropic.models.beta.organization.invites.InviteListParams$Status/of
+                    (mapv #(com.anthropic.models.organization.invites.InviteListParams$Status/of
                             (->wire (check-enum! % invite-list-statuses :status)))
                           statuses)))
-       (mapv invite->map (.autoPager (-> (.beta client) (.organization) (.invites)
+       (mapv invite->map (.autoPager (-> (.organization client) (.invites)
                                          (.list (.build b)))))))))
 
 (defn delete-invite
   "Delete an invite by id. Returns the delete response as a map."
   [^AnthropicClient client ^String invite-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.invites.InviteDeleteParams/builder)]
+    (let [b (com.anthropic.models.organization.invites.InviteDeleteParams/builder)]
       (.inviteId b ^String invite-id)
-      (obj->clj (-> (.beta client) (.organization) (.invites) (.delete (.build b)))))))
+      (obj->clj (-> (.organization client) (.invites) (.delete (.build b)))))))
 
 ;; ---- Rate limits (organization) -------------------------------------------
 
 (defn- ->rate-limit-group
-  "Convert BetaOrganizationRateLimit$Group union to Clojure map."
-  [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit$Group group]
+  "Convert OrganizationRateLimit$Group union to Clojure map."
+  [^com.anthropic.models.organization.ratelimits.OrganizationRateLimit$Group group]
   (when group
     (let [group-type (kw<- (.asString (.type group)))]
       (cond-> {:id (.id group) :type (name group-type)}
         (.isModel group)
-        (assoc :display-name (.displayName ^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitModelGroup (.asModel group)))))))
+        (assoc :display-name (.displayName ^com.anthropic.models.organization.ratelimits.OrganizationRateLimitModelGroup (.asModel group)))))))
 
 
 (defn- rate-limit->map
-  [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit r]
+  [^com.anthropic.models.organization.ratelimits.OrganizationRateLimit r]
   (cond-> {:id (.id r)
            :group (->rate-limit-group (.group r))
-           :limits (mapv (fn [^com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitValue limit]
+           :limits (mapv (fn [^com.anthropic.models.organization.ratelimits.OrganizationRateLimitValue limit]
                            {:type (.type limit)
                             :value (.value limit)})
                         (.limits r))}
@@ -410,20 +585,20 @@
   ([^AnthropicClient client] (list-rate-limits client {}))
   ([^AnthropicClient client {:keys [limit page model group-type]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.ratelimits.RateLimitListParams/builder)]
+     (let [b (com.anthropic.models.organization.ratelimits.RateLimitListParams/builder)]
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (when model (.model b ^String model))
        (when group-type
-         (.groupType b (com.anthropic.models.beta.organization.ratelimits.RateLimitListParams$GroupType/of
+         (.groupType b (com.anthropic.models.organization.ratelimits.RateLimitListParams$GroupType/of
                         (->wire (check-enum! group-type group-types :group-type)))))
-       (mapv rate-limit->map (.autoPager (-> (.beta client) (.organization) (.rateLimits)
+       (mapv rate-limit->map (.autoPager (-> (.organization client) (.rateLimits)
                                       (.list (.build b)))))))))
 
 ;; ---- Service accounts -----------------------------------------------------
 
 (defn- service-account->map
-  [^com.anthropic.models.beta.organization.serviceaccounts.BetaServiceAccount r]
+  [^com.anthropic.models.organization.serviceaccounts.ServiceAccount r]
   {:id (.id r)
    :archived-at (some-> (.archivedAt r) unopt str)
    :archived-by-actor-id (unopt (.archivedByActorId r))
@@ -431,7 +606,7 @@
    :created-by-actor-id (unopt (.createdByActorId r))
    :description (unopt (.description r))
    :name (.name r)
-   :organization-role (kw<- (.asString ^com.anthropic.models.beta.organization.serviceaccounts.BetaServiceAccount$OrganizationRole (.organizationRole r)))
+   :organization-role (kw<- (.asString ^com.anthropic.models.organization.serviceaccounts.ServiceAccount$OrganizationRole (.organizationRole r)))
    :updated-at (str (.updatedAt r))
    :updated-by-actor-id (unopt (.updatedByActorId r))})
 
@@ -441,35 +616,35 @@
   [^AnthropicClient client {:keys [name description organization-role]}]
   (with-api-errors
     (when-not name (missing-key! :name))
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountCreateParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.ServiceAccountCreateParams/builder)]
       (.name b ^String name)
       (when description (.description b ^String description))
       (when organization-role
-        (.organizationRole b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountCreateParams$OrganizationRole/of
+        (.organizationRole b (com.anthropic.models.organization.serviceaccounts.ServiceAccountCreateParams$OrganizationRole/of
                               (->wire (check-enum! organization-role sa-org-roles :organization-role)))))
-      (service-account->map (-> (.beta client) (.organization) (.serviceAccounts)
+      (service-account->map (-> (.organization client) (.serviceAccounts)
                                 (.create (.build b)))))))
 
 (defn get-service-account
   "Retrieve one service account by id."
   [^AnthropicClient client ^String service-account-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.ServiceAccountRetrieveParams/builder)]
       (.serviceAccountId b ^String service-account-id)
-      (service-account->map (-> (.beta client) (.organization) (.serviceAccounts)
+      (service-account->map (-> (.organization client) (.serviceAccounts)
                                 (.retrieve (.build b)))))))
 
 (defn update-service-account
   "Update a service account's `:description` and/or `:organization-role`."
   [^AnthropicClient client ^String service-account-id {:keys [description organization-role]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.ServiceAccountUpdateParams/builder)]
       (.serviceAccountId b ^String service-account-id)
       (when description (.description b ^String description))
       (when organization-role
-        (.organizationRole b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountUpdateParams$OrganizationRole/of
+        (.organizationRole b (com.anthropic.models.organization.serviceaccounts.ServiceAccountUpdateParams$OrganizationRole/of
                               (->wire (check-enum! organization-role sa-org-roles :organization-role)))))
-      (service-account->map (-> (.beta client) (.organization) (.serviceAccounts)
+      (service-account->map (-> (.organization client) (.serviceAccounts)
                                 (.update (.build b)))))))
 
 (defn list-service-accounts
@@ -477,29 +652,29 @@
   ([^AnthropicClient client] (list-service-accounts client {}))
   ([^AnthropicClient client {:keys [limit page include-archived]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountListParams/builder)]
+     (let [b (com.anthropic.models.organization.serviceaccounts.ServiceAccountListParams/builder)]
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (when (some? include-archived) (.includeArchived b (boolean include-archived)))
-       (mapv service-account->map (.autoPager (-> (.beta client) (.organization) (.serviceAccounts)
+       (mapv service-account->map (.autoPager (-> (.organization client) (.serviceAccounts)
                                                   (.list (.build b)))))))))
 
 (defn archive-service-account
   "Archive a service account by id. Returns the archived service account."
   [^AnthropicClient client ^String service-account-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.ServiceAccountArchiveParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.ServiceAccountArchiveParams/builder)]
       (.serviceAccountId b ^String service-account-id)
-      (service-account->map (-> (.beta client) (.organization) (.serviceAccounts)
+      (service-account->map (-> (.organization client) (.serviceAccounts)
                                 (.archive (.build b)))))))
 
 ;; ---- Service-account workspaces -------------------------------------------
 
 (defn- sa-workspace-member->map
-  [^com.anthropic.models.beta.organization.serviceaccounts.BetaServiceAccountWorkspaceMember r]
+  [^com.anthropic.models.organization.serviceaccounts.ServiceAccountWorkspaceMember r]
   {:service-account-id (.serviceAccountId r)
    :workspace-id (.workspaceId r)
-   :workspace-role (kw<- (.asString ^com.anthropic.models.beta.organization.workspaces.BetaWorkspaceRole (.workspaceRole r)))
+   :workspace-role (kw<- (.asString ^com.anthropic.models.organization.workspaces.WorkspaceRole (.workspaceRole r)))
    :created-by-actor-id (unopt (.createdByActorId r))
    :implicit (unopt (.implicit r))})
 
@@ -509,13 +684,13 @@
   [^AnthropicClient client ^String service-account-id {:keys [workspace-id workspace-role]}]
   (with-api-errors
     (when-not workspace-id (missing-key! :workspace-id))
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.workspaces.WorkspaceAddParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.workspaces.WorkspaceAddParams/builder)]
       (.serviceAccountId b ^String service-account-id)
       (.workspaceId b ^String workspace-id)
       (when workspace-role
-        (.workspaceRole b (com.anthropic.models.beta.organization.workspaces.BetaNoBillingWorkspaceRole/of
+        (.workspaceRole b (com.anthropic.models.organization.workspaces.NoBillingWorkspaceRole/of
                            (->wire (check-enum! workspace-role no-billing-ws-roles :workspace-role)))))
-      (sa-workspace-member->map (-> (.beta client) (.organization) (.serviceAccounts)
+      (sa-workspace-member->map (-> (.organization client) (.serviceAccounts)
                                     (.workspaces) (.add (.build b)))))))
 
 (defn list-service-account-workspaces
@@ -524,46 +699,46 @@
    (list-service-account-workspaces client service-account-id {}))
   ([^AnthropicClient client ^String service-account-id {:keys [limit page]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.serviceaccounts.workspaces.WorkspaceListParams/builder)]
+     (let [b (com.anthropic.models.organization.serviceaccounts.workspaces.WorkspaceListParams/builder)]
        (.serviceAccountId b ^String service-account-id)
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (mapv sa-workspace-member->map
-             (.autoPager (-> (.beta client) (.organization) (.serviceAccounts) (.workspaces)
+             (.autoPager (-> (.organization client) (.serviceAccounts) (.workspaces)
                              (.list (.build b)))))))))
 
 (defn remove-service-account-workspace
   "Remove a service account from a workspace. Returns the removal response map."
   [^AnthropicClient client ^String service-account-id ^String workspace-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.serviceaccounts.workspaces.WorkspaceRemoveParams/builder)]
+    (let [b (com.anthropic.models.organization.serviceaccounts.workspaces.WorkspaceRemoveParams/builder)]
       (.serviceAccountId b ^String service-account-id)
       (.workspaceId b ^String workspace-id)
-      (obj->clj (-> (.beta client) (.organization) (.serviceAccounts) (.workspaces)
+      (obj->clj (-> (.organization client) (.serviceAccounts) (.workspaces)
                     (.remove (.build b)))))))
 
 ;; ---- Workspaces -----------------------------------------------------------
 
 (defn- data-residency->map
-  [^com.anthropic.models.beta.organization.workspaces.BetaDataResidency r]
+  [^com.anthropic.models.organization.workspaces.DataResidency r]
   (let [allowed (.allowedInferenceGeos r)]
     {:allowed-inference-geos
      (cond
        (.isGeos allowed)
        (mapv #(kw<- (.asString
-                     ^com.anthropic.models.beta.organization.workspaces.BetaAllowedInferenceGeo %))
+                     ^com.anthropic.models.organization.workspaces.AllowedInferenceGeo %))
              (.asGeos allowed))
        (.isUnrestricted allowed) :unrestricted)
      :default-inference-geo
      (kw<- (.asString
-            ^com.anthropic.models.beta.organization.workspaces.BetaDataResidency$DefaultInferenceGeo
+            ^com.anthropic.models.organization.workspaces.DataResidency$DefaultInferenceGeo
             (.defaultInferenceGeo r)))
      :workspace-geo
      (kw<- (.asString
-            ^com.anthropic.models.beta.organization.workspaces.BetaDataResidency$WorkspaceGeo
+            ^com.anthropic.models.organization.workspaces.DataResidency$WorkspaceGeo
             (.workspaceGeo r)))}))
 
-(defn- workspace->map [^com.anthropic.models.beta.organization.workspaces.BetaWorkspace r]
+(defn- workspace->map [^com.anthropic.models.organization.workspaces.Workspace r]
   {:id (.id r)
    :archived-at (some-> (.archivedAt r) unopt str)
    :compartment-id (.compartmentId r)
@@ -580,35 +755,35 @@
   [^AnthropicClient client {:keys [name display-color external-key-id data-residency tags]}]
   (with-api-errors
     (when-not name (missing-key! :name))
-    (let [b (com.anthropic.models.beta.organization.workspaces.WorkspaceCreateParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.WorkspaceCreateParams/builder)]
       (.name b ^String name)
       (when display-color (.displayColor b ^String display-color))
       (when external-key-id (.externalKeyId b ^String external-key-id))
-      (when data-residency (.dataResidency b ^com.anthropic.models.beta.organization.workspaces.BetaDataResidencyCreateConfig data-residency))
-      (when tags (.tags b ^com.anthropic.models.beta.organization.workspaces.WorkspaceCreateParams$Tags tags))
-      (workspace->map (-> (.beta client) (.organization) (.workspaces) (.create (.build b)))))))
+      (when data-residency (.dataResidency b ^com.anthropic.models.organization.workspaces.DataResidencyCreateConfig data-residency))
+      (when tags (.tags b ^com.anthropic.models.organization.workspaces.WorkspaceCreateParams$Tags tags))
+      (workspace->map (-> (.organization client) (.workspaces) (.create (.build b)))))))
 
 (defn get-workspace
   "Retrieve one workspace by id."
   [^AnthropicClient client ^String workspace-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.WorkspaceRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.WorkspaceRetrieveParams/builder)]
       (.workspaceId b ^String workspace-id)
-      (workspace->map (-> (.beta client) (.organization) (.workspaces) (.retrieve (.build b)))))))
+      (workspace->map (-> (.organization client) (.workspaces) (.retrieve (.build b)))))))
 
 (defn update-workspace
   "Update a workspace's `:name`, `:display-color`, `:external-key-id`, or
   `:data-residency`/`:tags` (ready SDK config objects)."
   [^AnthropicClient client ^String workspace-id {:keys [name display-color external-key-id data-residency tags]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.WorkspaceUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.WorkspaceUpdateParams/builder)]
       (.workspaceId b ^String workspace-id)
       (when name (.name b ^String name))
       (when display-color (.displayColor b ^String display-color))
       (when external-key-id (.externalKeyId b ^String external-key-id))
-      (when data-residency (.dataResidency b ^com.anthropic.models.beta.organization.workspaces.BetaDataResidencyUpdateConfig data-residency))
-      (when tags (.tags b ^com.anthropic.models.beta.organization.workspaces.WorkspaceUpdateParams$Tags tags))
-      (workspace->map (-> (.beta client) (.organization) (.workspaces) (.update (.build b)))))))
+      (when data-residency (.dataResidency b ^com.anthropic.models.organization.workspaces.DataResidencyUpdateConfig data-residency))
+      (when tags (.tags b ^com.anthropic.models.organization.workspaces.WorkspaceUpdateParams$Tags tags))
+      (workspace->map (-> (.organization client) (.workspaces) (.update (.build b)))))))
 
 (defn list-workspaces
   "List workspaces. Options: `:limit`, `:after-id`, `:before-id`,
@@ -616,51 +791,51 @@
   ([^AnthropicClient client] (list-workspaces client {}))
   ([^AnthropicClient client {:keys [limit after-id before-id include-archived]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.workspaces.WorkspaceListParams/builder)]
+     (let [b (com.anthropic.models.organization.workspaces.WorkspaceListParams/builder)]
        (when limit (.limit b (long limit)))
        (when after-id (.afterId b ^String after-id))
        (when before-id (.beforeId b ^String before-id))
        (when (some? include-archived) (.includeArchived b (boolean include-archived)))
-       (mapv workspace->map (.autoPager (-> (.beta client) (.organization) (.workspaces)
+       (mapv workspace->map (.autoPager (-> (.organization client) (.workspaces)
                                             (.list (.build b)))))))))
 
 (defn archive-workspace
   "Archive a workspace by id. Returns the archived workspace."
   [^AnthropicClient client ^String workspace-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.WorkspaceArchiveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.WorkspaceArchiveParams/builder)]
       (.workspaceId b ^String workspace-id)
-      (workspace->map (-> (.beta client) (.organization) (.workspaces) (.archive (.build b)))))))
+      (workspace->map (-> (.organization client) (.workspaces) (.archive (.build b)))))))
 
 ;; ---- Workspace members ----------------------------------------------------
 
 (defn- workspace-member->map
-  [^com.anthropic.models.beta.organization.workspaces.BetaWorkspaceMember r]
+  [^com.anthropic.models.organization.workspaces.WorkspaceMember r]
   {:user-id (.userId r)
    :workspace-id (.workspaceId r)
-   :workspace-role (kw<- (.asString ^com.anthropic.models.beta.organization.workspaces.BetaWorkspaceRole (.workspaceRole r)))})
+   :workspace-role (kw<- (.asString ^com.anthropic.models.organization.workspaces.WorkspaceRole (.workspaceRole r)))})
 
 (defn get-workspace-member
   "Retrieve one workspace member by workspace id and user id."
   [^AnthropicClient client ^String workspace-id ^String user-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.members.MemberRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.members.MemberRetrieveParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.userId b ^String user-id)
-      (workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.members)
+      (workspace-member->map (-> (.organization client) (.workspaces) (.members)
                                  (.retrieve (.build b)))))))
 
 (defn update-workspace-member
   "Update a workspace member's `:workspace-role` (any workspace role)."
   [^AnthropicClient client ^String workspace-id ^String user-id {:keys [workspace-role]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.members.MemberUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.members.MemberUpdateParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.userId b ^String user-id)
       (when workspace-role
-        (.workspaceRole b (com.anthropic.models.beta.organization.workspaces.BetaWorkspaceRole/of
+        (.workspaceRole b (com.anthropic.models.organization.workspaces.WorkspaceRole/of
                            (->wire (check-enum! workspace-role ws-roles :workspace-role)))))
-      (workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.members)
+      (workspace-member->map (-> (.organization client) (.workspaces) (.members)
                                  (.update (.build b)))))))
 
 (defn list-workspace-members
@@ -669,13 +844,13 @@
    (list-workspace-members client workspace-id {}))
   ([^AnthropicClient client ^String workspace-id {:keys [limit after-id before-id]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.workspaces.members.MemberListParams/builder)]
+     (let [b (com.anthropic.models.organization.workspaces.members.MemberListParams/builder)]
        (.workspaceId b ^String workspace-id)
        (when limit (.limit b (long limit)))
        (when after-id (.afterId b ^String after-id))
        (when before-id (.beforeId b ^String before-id))
        (mapv workspace-member->map
-             (.autoPager (-> (.beta client) (.organization) (.workspaces) (.members)
+             (.autoPager (-> (.organization client) (.workspaces) (.members)
                              (.list (.build b)))))))))
 
 (defn add-workspace-member
@@ -684,32 +859,32 @@
   [^AnthropicClient client ^String workspace-id {:keys [user-id workspace-role]}]
   (with-api-errors
     (when-not user-id (missing-key! :user-id))
-    (let [b (com.anthropic.models.beta.organization.workspaces.members.MemberAddParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.members.MemberAddParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.userId b ^String user-id)
       (when workspace-role
-        (.workspaceRole b (com.anthropic.models.beta.organization.workspaces.BetaNoBillingWorkspaceRole/of
+        (.workspaceRole b (com.anthropic.models.organization.workspaces.NoBillingWorkspaceRole/of
                            (->wire (check-enum! workspace-role no-billing-ws-roles :workspace-role)))))
-      (workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.members)
+      (workspace-member->map (-> (.organization client) (.workspaces) (.members)
                                  (.add (.build b)))))))
 
 (defn remove-workspace-member
   "Remove a user from a workspace. Returns the removal response as a map."
   [^AnthropicClient client ^String workspace-id ^String user-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.members.MemberRemoveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.members.MemberRemoveParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.userId b ^String user-id)
-      (obj->clj (-> (.beta client) (.organization) (.workspaces) (.members)
+      (obj->clj (-> (.organization client) (.workspaces) (.members)
                     (.remove (.build b)))))))
 
 
 (defn- workspace-rate-limit->map
-  [^com.anthropic.models.beta.organization.workspaces.ratelimits.BetaWorkspaceRateLimit r]
+  [^com.anthropic.models.organization.workspaces.ratelimits.WorkspaceRateLimit r]
   (cond-> {:rate-limit-id (.rateLimitId r)
            :workspace-id (.workspaceId r)
            :group (->rate-limit-group (.group r))
-           :limits (mapv (fn [^com.anthropic.models.beta.organization.workspaces.ratelimits.BetaWorkspaceRateLimitValue limit]
+           :limits (mapv (fn [^com.anthropic.models.organization.workspaces.ratelimits.WorkspaceRateLimitValue limit]
                            (cond-> {:type (.type limit)
                                     :value (.value limit)}
                              (some? (unopt (.orgLimit limit)))
@@ -724,13 +899,13 @@
 
 (defn- ->workspace-rate-limit-list-params
   [workspace-id {:keys [limit page group-type include-inherited]}]
-  (let [b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams/builder)]
+  (let [b (com.anthropic.models.organization.workspaces.ratelimits.RateLimitListParams/builder)]
     (.workspaceId b ^String workspace-id)
     (when limit (.limit b (long limit)))
     (when page (.page b ^String page))
     (when (some? include-inherited) (.includeInherited b (boolean include-inherited)))
     (when group-type
-      (.groupType b (com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitListParams$GroupType/of
+      (.groupType b (com.anthropic.models.organization.workspaces.ratelimits.RateLimitListParams$GroupType/of
                     (->wire (check-enum! group-type group-types :group-type)))))
     (.build b)))
 
@@ -742,7 +917,7 @@
   ([^AnthropicClient client ^String workspace-id opts]
    (with-api-errors
      (let [params (->workspace-rate-limit-list-params workspace-id opts)]
-       (mapv workspace-rate-limit->map (.autoPager (-> (.beta client) (.organization) (.workspaces) (.rateLimits)
+       (mapv workspace-rate-limit->map (.autoPager (-> (.organization client) (.workspaces) (.rateLimits)
                                       (.list params))))))))
 
 ;; ---- Workspace service accounts -------------------------------------------
@@ -751,23 +926,23 @@
   "Retrieve a service account's membership in a workspace."
   [^AnthropicClient client ^String workspace-id ^String service-account-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.serviceaccounts.ServiceAccountRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.serviceaccounts.ServiceAccountRetrieveParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.serviceAccountId b ^String service-account-id)
-      (sa-workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.serviceAccounts)
+      (sa-workspace-member->map (-> (.organization client) (.workspaces) (.serviceAccounts)
                                     (.retrieve (.build b)))))))
 
 (defn update-workspace-service-account
   "Update a workspace service account's `:workspace-role` (a non-billing role)."
   [^AnthropicClient client ^String workspace-id ^String service-account-id {:keys [workspace-role]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.serviceaccounts.ServiceAccountUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.serviceaccounts.ServiceAccountUpdateParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.serviceAccountId b ^String service-account-id)
       (when workspace-role
-        (.workspaceRole b (com.anthropic.models.beta.organization.workspaces.BetaNoBillingWorkspaceRole/of
+        (.workspaceRole b (com.anthropic.models.organization.workspaces.NoBillingWorkspaceRole/of
                            (->wire (check-enum! workspace-role no-billing-ws-roles :workspace-role)))))
-      (sa-workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.serviceAccounts)
+      (sa-workspace-member->map (-> (.organization client) (.workspaces) (.serviceAccounts)
                                     (.update (.build b)))))))
 
 (defn list-workspace-service-accounts
@@ -776,12 +951,12 @@
    (list-workspace-service-accounts client workspace-id {}))
   ([^AnthropicClient client ^String workspace-id {:keys [limit page]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.workspaces.serviceaccounts.ServiceAccountListParams/builder)]
+     (let [b (com.anthropic.models.organization.workspaces.serviceaccounts.ServiceAccountListParams/builder)]
        (.workspaceId b ^String workspace-id)
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (mapv sa-workspace-member->map
-             (.autoPager (-> (.beta client) (.organization) (.workspaces) (.serviceAccounts)
+             (.autoPager (-> (.organization client) (.workspaces) (.serviceAccounts)
                              (.list (.build b)))))))))
 
 (defn add-workspace-service-account
@@ -789,29 +964,29 @@
   [^AnthropicClient client ^String workspace-id {:keys [service-account-id workspace-role]}]
   (with-api-errors
     (when-not service-account-id (missing-key! :service-account-id))
-    (let [b (com.anthropic.models.beta.organization.workspaces.serviceaccounts.ServiceAccountAddParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.serviceaccounts.ServiceAccountAddParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.serviceAccountId b ^String service-account-id)
       (when workspace-role
-        (.workspaceRole b (com.anthropic.models.beta.organization.workspaces.BetaNoBillingWorkspaceRole/of
+        (.workspaceRole b (com.anthropic.models.organization.workspaces.NoBillingWorkspaceRole/of
                            (->wire (check-enum! workspace-role no-billing-ws-roles :workspace-role)))))
-      (sa-workspace-member->map (-> (.beta client) (.organization) (.workspaces) (.serviceAccounts)
+      (sa-workspace-member->map (-> (.organization client) (.workspaces) (.serviceAccounts)
                                     (.add (.build b)))))))
 
 (defn remove-workspace-service-account
   "Remove a service account from a workspace. Returns the removal response map."
   [^AnthropicClient client ^String workspace-id ^String service-account-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.workspaces.serviceaccounts.ServiceAccountRemoveParams/builder)]
+    (let [b (com.anthropic.models.organization.workspaces.serviceaccounts.ServiceAccountRemoveParams/builder)]
       (.workspaceId b ^String workspace-id)
       (.serviceAccountId b ^String service-account-id)
-      (obj->clj (-> (.beta client) (.organization) (.workspaces) (.serviceAccounts)
+      (obj->clj (-> (.organization client) (.workspaces) (.serviceAccounts)
                     (.remove (.build b)))))))
 
 ;; ---- Federation issuers ---------------------------------------------------
 
 (defn- federation-issuer->map
-  [^com.anthropic.models.beta.organization.federation.issuers.BetaFederationIssuer r]
+  [^com.anthropic.models.organization.federation.issuers.FederationIssuer r]
   {:id (.id r)
    :archived-at (some-> (.archivedAt r) unopt str)
    :archived-by-actor-id (unopt (.archivedByActorId r))
@@ -835,23 +1010,23 @@
   (with-api-errors
     (when-not name (missing-key! :name))
     (when-not issuer-url (missing-key! :issuer-url))
-    (let [b (com.anthropic.models.beta.organization.federation.issuers.IssuerCreateParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.issuers.IssuerCreateParams/builder)]
       (.name b ^String name)
       (.issuerUrl b ^String issuer-url)
       (when explicit-url-jwks (.explicitUrlJwks b ^String explicit-url-jwks))
-      (when jwks (.jwks b ^com.anthropic.models.beta.organization.federation.issuers.IssuerCreateParams$Jwks jwks))
+      (when jwks (.jwks b ^com.anthropic.models.organization.federation.issuers.IssuerCreateParams$Jwks jwks))
       (when (some? check-jti) (.checkJti b (boolean check-jti)))
       (when max-jwt-lifetime-seconds (.maxJwtLifetimeSeconds b (long max-jwt-lifetime-seconds)))
-      (federation-issuer->map (-> (.beta client) (.organization) (.federation) (.issuers)
+      (federation-issuer->map (-> (.organization client) (.federation) (.issuers)
                                   (.create (.build b)))))))
 
 (defn get-federation-issuer
   "Retrieve one federation issuer by id."
   [^AnthropicClient client ^String issuer-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.federation.issuers.IssuerRetrieveParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.issuers.IssuerRetrieveParams/builder)]
       (.federationIssuerId b ^String issuer-id)
-      (federation-issuer->map (-> (.beta client) (.organization) (.federation) (.issuers)
+      (federation-issuer->map (-> (.organization client) (.federation) (.issuers)
                                   (.retrieve (.build b)))))))
 
 (defn update-federation-issuer
@@ -861,16 +1036,16 @@
   [^AnthropicClient client ^String issuer-id
    {:keys [name issuer-url explicit-url-jwks jwks check-jti max-jwt-lifetime-seconds jwks-polling-disabled]}]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.federation.issuers.IssuerUpdateParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.issuers.IssuerUpdateParams/builder)]
       (.federationIssuerId b ^String issuer-id)
       (when name (.name b ^String name))
       (when issuer-url (.issuerUrl b ^String issuer-url))
       (when explicit-url-jwks (.explicitUrlJwks b ^String explicit-url-jwks))
-      (when jwks (.jwks b ^com.anthropic.models.beta.organization.federation.issuers.IssuerUpdateParams$Jwks jwks))
+      (when jwks (.jwks b ^com.anthropic.models.organization.federation.issuers.IssuerUpdateParams$Jwks jwks))
       (when (some? check-jti) (.checkJti b (boolean check-jti)))
       (when max-jwt-lifetime-seconds (.maxJwtLifetimeSeconds b (long max-jwt-lifetime-seconds)))
       (when (some? jwks-polling-disabled) (.jwksPollingDisabled b (boolean jwks-polling-disabled)))
-      (federation-issuer->map (-> (.beta client) (.organization) (.federation) (.issuers)
+      (federation-issuer->map (-> (.organization client) (.federation) (.issuers)
                                   (.update (.build b)))))))
 
 (defn list-federation-issuers
@@ -878,21 +1053,21 @@
   ([^AnthropicClient client] (list-federation-issuers client {}))
   ([^AnthropicClient client {:keys [limit page include-archived]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.federation.issuers.IssuerListParams/builder)]
+     (let [b (com.anthropic.models.organization.federation.issuers.IssuerListParams/builder)]
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (when (some? include-archived) (.includeArchived b (boolean include-archived)))
        (mapv federation-issuer->map
-             (.autoPager (-> (.beta client) (.organization) (.federation) (.issuers)
+             (.autoPager (-> (.organization client) (.federation) (.issuers)
                              (.list (.build b)))))))))
 
 (defn archive-federation-issuer
   "Archive a federation issuer by id. Returns the archived issuer."
   [^AnthropicClient client ^String issuer-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.federation.issuers.IssuerArchiveParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.issuers.IssuerArchiveParams/builder)]
       (.federationIssuerId b ^String issuer-id)
-      (federation-issuer->map (-> (.beta client) (.organization) (.federation) (.issuers)
+      (federation-issuer->map (-> (.organization client) (.federation) (.issuers)
                                   (.archive (.build b)))))))
 
 ;; ---- Federation rules -----------------------------------------------------
@@ -1028,7 +1203,7 @@
 ;; ---- Federation rule workspaces -------------------------------------------
 
 (defn- rule-workspace->map
-  [^com.anthropic.models.beta.organization.federation.rules.BetaFederationRuleWorkspace r]
+  [^com.anthropic.models.organization.federation.rules.FederationRuleWorkspace r]
   {:federation-rule-id (.federationRuleId r)
    :workspace-id (.workspaceId r)
    :created-at (str (.createdAt r))
@@ -1039,10 +1214,10 @@
   "Attach a workspace to a federation rule."
   [^AnthropicClient client ^String rule-id ^String workspace-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.federation.rules.workspaces.WorkspaceAddParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.rules.workspaces.WorkspaceAddParams/builder)]
       (.federationRuleId b ^String rule-id)
       (.workspaceId b ^String workspace-id)
-      (rule-workspace->map (-> (.beta client) (.organization) (.federation) (.rules) (.workspaces)
+      (rule-workspace->map (-> (.organization client) (.federation) (.rules) (.workspaces)
                                (.add (.build b)))))))
 
 (defn list-federation-rule-workspaces
@@ -1051,20 +1226,99 @@
    (list-federation-rule-workspaces client rule-id {}))
   ([^AnthropicClient client ^String rule-id {:keys [limit page]}]
    (with-api-errors
-     (let [b (com.anthropic.models.beta.organization.federation.rules.workspaces.WorkspaceListParams/builder)]
+     (let [b (com.anthropic.models.organization.federation.rules.workspaces.WorkspaceListParams/builder)]
        (.federationRuleId b ^String rule-id)
        (when limit (.limit b (long limit)))
        (when page (.page b ^String page))
        (mapv rule-workspace->map
-             (.autoPager (-> (.beta client) (.organization) (.federation) (.rules) (.workspaces)
+             (.autoPager (-> (.organization client) (.federation) (.rules) (.workspaces)
                              (.list (.build b)))))))))
 
 (defn remove-federation-rule-workspace
   "Detach a workspace from a federation rule. Returns the removal response map."
   [^AnthropicClient client ^String rule-id ^String workspace-id]
   (with-api-errors
-    (let [b (com.anthropic.models.beta.organization.federation.rules.workspaces.WorkspaceRemoveParams/builder)]
+    (let [b (com.anthropic.models.organization.federation.rules.workspaces.WorkspaceRemoveParams/builder)]
       (.federationRuleId b ^String rule-id)
       (.workspaceId b ^String workspace-id)
-      (obj->clj (-> (.beta client) (.organization) (.federation) (.rules) (.workspaces)
+      (obj->clj (-> (.organization client) (.federation) (.rules) (.workspaces)
                     (.remove (.build b)))))))
+
+;; ---- Beta-only administration --------------------------------------------
+
+(defn- analytics [client] (dynamic-call (beta-organization client) "analytics"))
+(defn- analytics-list [client path params opts]
+  (dynamic-list (reduce dynamic-call (analytics client) path)
+                (->dynamic-params params (or opts {}))))
+
+(defn list-analytics-summaries [client opts]
+  (with-api-errors (analytics-list client ["summaries"] "com.anthropic.models.beta.organization.analytics.summaries.SummaryListParams" opts)))
+(defn list-analytics-users
+  ([client] (list-analytics-users client {}))
+  ([client opts] (with-api-errors (analytics-list client ["users"] "com.anthropic.models.beta.organization.analytics.users.UserListParams" opts))))
+(defn list-analytics-chat-projects
+  ([client] (list-analytics-chat-projects client {}))
+  ([client opts] (with-api-errors (analytics-list client ["apps" "chat" "projects"] "com.anthropic.models.beta.organization.analytics.apps.chat.projects.ProjectListParams" opts))))
+(defn list-analytics-connectors
+  ([client] (list-analytics-connectors client {}))
+  ([client opts] (with-api-errors (analytics-list client ["connectors"] "com.anthropic.models.beta.organization.analytics.connectors.ConnectorListParams" opts))))
+(defn list-analytics-plugins
+  ([client] (list-analytics-plugins client {}))
+  ([client opts] (with-api-errors (analytics-list client ["plugins"] "com.anthropic.models.beta.organization.analytics.plugins.PluginListParams" opts))))
+(defn list-analytics-skills
+  ([client] (list-analytics-skills client {}))
+  ([client opts] (with-api-errors (analytics-list client ["skills"] "com.anthropic.models.beta.organization.analytics.skills.SkillListParams" opts))))
+(defn list-analytics-artifacts [client opts]
+  (with-api-errors (analytics-list client ["artifacts"] "com.anthropic.models.beta.organization.analytics.artifacts.ArtifactListParams" opts)))
+(defn list-analytics-usage-report [client opts]
+  (with-api-errors (analytics-list client ["usageReport"] "com.anthropic.models.beta.organization.analytics.usagereport.UsageReportListParams" opts)))
+(defn list-analytics-user-usage-report [client opts]
+  (with-api-errors (analytics-list client ["userUsageReport"] "com.anthropic.models.beta.organization.analytics.userusagereport.UserUsageReportListParams" opts)))
+(defn list-analytics-cost-report [client opts]
+  (with-api-errors (analytics-list client ["costReport"] "com.anthropic.models.beta.organization.analytics.costreport.CostReportListParams" opts)))
+(defn list-analytics-user-cost-report [client opts]
+  (with-api-errors (analytics-list client ["userCostReport"] "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListParams" opts)))
+
+(defn- admin-call [client service method params opts]
+  (obj->clj (dynamic-call (dynamic-call (beta-organization client) service)
+                          method (->dynamic-params params opts))))
+(defn- admin-list [client service params opts]
+  (dynamic-list (dynamic-call (beta-organization client) service)
+                (->dynamic-params params (or opts {}))))
+
+(defn get-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "retrieve" "com.anthropic.models.beta.organization.spendlimits.SpendLimitRetrieveParams" {:spend-limit-id id})))
+(defn delete-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "delete" "com.anthropic.models.beta.organization.spendlimits.SpendLimitDeleteParams" {:spend-limit-id id})))
+(defn set-spend-limit [client changes] (with-api-errors (admin-call client "spendLimits" "set" "com.anthropic.models.beta.organization.spendlimits.SpendLimitSetParams" changes)))
+
+(defn create-rbac-group [client changes] (with-api-errors (admin-call client "rbacGroups" "create" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupCreateParams" changes)))
+(defn get-rbac-group [client id] (with-api-errors (admin-call client "rbacGroups" "retrieve" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupRetrieveParams" {:rbac-group-id id})))
+(defn update-rbac-group [client id changes] (with-api-errors (admin-call client "rbacGroups" "update" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupUpdateParams" (assoc changes :rbac-group-id id))))
+(defn list-rbac-groups ([client] (list-rbac-groups client {})) ([client opts] (with-api-errors (admin-list client "rbacGroups" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupListParams" opts))))
+(defn delete-rbac-group [client id] (with-api-errors (admin-call client "rbacGroups" "delete" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupDeleteParams" {:rbac-group-id id})))
+(defn get-rbac-role [client id] (with-api-errors (admin-call client "rbacRoles" "retrieve" "com.anthropic.models.beta.organization.rbacroles.RbacRoleRetrieveParams" {:rbac-role-id id})))
+(defn list-rbac-roles ([client] (list-rbac-roles client {})) ([client opts] (with-api-errors (admin-list client "rbacRoles" "com.anthropic.models.beta.organization.rbacroles.RbacRoleListParams" opts))))
+
+(defn create-plugin [client changes] (with-api-errors (admin-call client "plugins" "create" "com.anthropic.models.beta.organization.plugins.PluginCreateParams" changes)))
+(defn get-plugin [client id] (with-api-errors (admin-call client "plugins" "retrieve" "com.anthropic.models.beta.organization.plugins.PluginRetrieveParams" {:plugin-id id})))
+(defn update-plugin [client id changes] (with-api-errors (admin-call client "plugins" "update" "com.anthropic.models.beta.organization.plugins.PluginUpdateParams" (assoc changes :plugin-id id))))
+(defn list-plugins ([client] (list-plugins client {})) ([client opts] (with-api-errors (admin-list client "plugins" "com.anthropic.models.beta.organization.plugins.PluginListParams" opts))))
+(defn delete-plugin [client id] (with-api-errors (admin-call client "plugins" "delete" "com.anthropic.models.beta.organization.plugins.PluginDeleteParams" {:plugin-id id})))
+
+(defn- plugin-installation-settings [client]
+  (dynamic-call (dynamic-call (beta-organization client) "plugins") "installationSettings"))
+(defn list-plugin-installation-settings
+  ([client plugin-id] (list-plugin-installation-settings client plugin-id {}))
+  ([client plugin-id opts] (with-api-errors (dynamic-list (plugin-installation-settings client) (->dynamic-params "com.anthropic.models.beta.organization.plugins.installationsettings.InstallationSettingListParams" (assoc opts :plugin-id plugin-id))))))
+(defn remove-plugin-installation-setting
+  "Remove the installation setting of `plugin-id` for `target` (the id of the
+  organization member, RBAC group, etc. the setting applies to)."
+  [client plugin-id target]
+  (with-api-errors (obj->clj (dynamic-call (plugin-installation-settings client) "remove" (->dynamic-params "com.anthropic.models.beta.organization.plugins.installationsettings.InstallationSettingRemoveParams" {:plugin-id plugin-id :target target})))))
+(defn set-plugin-installation-setting [client plugin-id changes]
+  (with-api-errors (obj->clj (dynamic-call (plugin-installation-settings client) "set" (->dynamic-params "com.anthropic.models.beta.organization.plugins.installationsettings.InstallationSettingSetParams" (assoc changes :plugin-id plugin-id))))))
+
+(defn get-plugin-marketplace [client id] (with-api-errors (admin-call client "pluginMarketplaces" "retrieve" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceRetrieveParams" {:marketplace-id id})))
+(defn update-plugin-marketplace [client id changes] (with-api-errors (admin-call client "pluginMarketplaces" "update" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceUpdateParams" (assoc changes :marketplace-id id))))
+(defn list-plugin-marketplaces ([client] (list-plugin-marketplaces client {})) ([client opts] (with-api-errors (admin-list client "pluginMarketplaces" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceListParams" opts))))
+(defn validate-plugin-marketplace-archive [client archive] (with-api-errors (admin-call client "pluginMarketplaces" "validateArchive" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceValidateArchiveParams" {:archive archive})))
+(defn validate-plugin-marketplace-repository [client repository-url opts] (with-api-errors (admin-call client "pluginMarketplaces" "validateRepository" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceValidateRepositoryParams" (assoc (or opts {}) :repository-url repository-url))))

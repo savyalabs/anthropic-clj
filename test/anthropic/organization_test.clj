@@ -1,16 +1,18 @@
 (ns anthropic.organization-test
   (:require [clojure.test :refer [deftest is testing]]
-            [anthropic.organization])
-  (:import (com.anthropic.models.beta.organization.users BetaOrganizationUser)
-           (com.anthropic.models.beta.organization BetaOrganizationRole)
-           (com.anthropic.models.beta.organization.workspaces BetaAllowedInferenceGeo
-                                                              BetaDataResidency
-                                                              BetaDataResidency$DefaultInferenceGeo
-                                                              BetaDataResidency$WorkspaceGeo
-                                                              BetaWorkspace
-                                                              BetaWorkspace$Tags
-                                                              BetaWorkspaceMember
-                                                              BetaWorkspaceRole)
+            [anthropic.organization]
+            [anthropic.organization-test-support :as support])
+  (:import
+           (com.anthropic.models.organization.users OrganizationUser)
+           (com.anthropic.models.organization OrganizationRole)
+           (com.anthropic.models.organization.workspaces AllowedInferenceGeo
+                                                              DataResidency
+                                                              DataResidency$DefaultInferenceGeo
+                                                              DataResidency$WorkspaceGeo
+                                                              Workspace
+                                                              Workspace$Tags
+                                                              WorkspaceMember
+                                                              WorkspaceRole)
            (com.anthropic.models.beta.organization.federation.rules BetaServiceAccountTarget
                                                                     BetaFederationRuleMatch)
            (java.time OffsetDateTime)
@@ -30,19 +32,19 @@
 (deftest compliance-settings-conversion
   (let [->params (private-fn '->compliance-update-params)
         convert (private-fn 'compliance-settings->map)
-        ^com.anthropic.models.beta.organization.compliancesettings.ComplianceSettingUpdateParams p
+        ^com.anthropic.models.organization.compliancesettings.ComplianceSettingUpdateParams p
         (->params {:state :enabled})
-        enabled (.build (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateEnabled/builder))
-        response (-> (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettings/builder)
-                     (.state (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsState/ofEnabled enabled))
+        enabled (.build (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateEnabled/builder))
+        response (-> (com.anthropic.models.organization.compliancesettings.OrganizationComplianceSettings/builder)
+                     (.state (com.anthropic.models.organization.compliancesettings.ComplianceSettingsState/ofEnabled enabled))
                      (.build))]
     (is (.isEnabled (.state p)))
     (is (= {:state :enabled} (convert response)))
     (is (= {:state :disabled}
            (convert
-            (-> (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettings/builder)
-                (.state (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsState/ofDisabled
-                         (.build (com.anthropic.models.beta.organization.compliancesettings.BetaComplianceSettingsStateDisabled/builder))))
+            (-> (com.anthropic.models.organization.compliancesettings.OrganizationComplianceSettings/builder)
+                (.state (com.anthropic.models.organization.compliancesettings.ComplianceSettingsState/ofDisabled
+                         (.build (com.anthropic.models.organization.compliancesettings.ComplianceSettingsStateDisabled/builder))))
                 (.build)))))))
 
 ;; ---- enum coercion --------------------------------------------------------
@@ -90,12 +92,12 @@
 (deftest org-user->map-shape
   (let [conv (private-fn 'org-user->map)
         now (OffsetDateTime/parse "2026-08-26T00:00:00Z")
-        u (-> (BetaOrganizationUser/builder)
+        u (-> (OrganizationUser/builder)
               (.id "user_1")
               (.addedAt now)
               (.email "a@b.c")
               (.name "Ada")
-              (.role (BetaOrganizationRole/of "primary_owner"))
+              (.role (OrganizationRole/of "primary_owner"))
               (.build))
         m (conv u)]
     (is (= "user_1" (:id m)))
@@ -106,10 +108,10 @@
 
 (deftest workspace-member->map-shape
   (let [conv (private-fn 'workspace-member->map)
-        wm (-> (BetaWorkspaceMember/builder)
+        wm (-> (WorkspaceMember/builder)
                (.userId "user_9")
                (.workspaceId "wrkspc_9")
-               (.workspaceRole (BetaWorkspaceRole/of "workspace_developer"))
+               (.workspaceRole (WorkspaceRole/of "workspace_developer"))
                (.build))
         m (conv wm)]
     (is (= "user_9" (:user-id m)))
@@ -118,15 +120,15 @@
 
 (deftest workspace-data-residency-enums-are-keywords
   (let [convert (private-fn 'workspace->map)
-        data-residency (-> (BetaDataResidency/builder)
+        data-residency (-> (DataResidency/builder)
                            (.allowedInferenceGeosOfGeos
-                            [(BetaAllowedInferenceGeo/of "global")
-                             (BetaAllowedInferenceGeo/of "us")])
+                            [(AllowedInferenceGeo/of "global")
+                             (AllowedInferenceGeo/of "us")])
                            (.defaultInferenceGeo
-                            (BetaDataResidency$DefaultInferenceGeo/of "global"))
-                           (.workspaceGeo (BetaDataResidency$WorkspaceGeo/of "us"))
+                            (DataResidency$DefaultInferenceGeo/of "global"))
+                           (.workspaceGeo (DataResidency$WorkspaceGeo/of "us"))
                            .build)
-        workspace (-> (BetaWorkspace/builder)
+        workspace (-> (Workspace/builder)
                       (.id "wrkspc_1")
                       (.archivedAt (Optional/empty))
                       (.compartmentId "compartment_1")
@@ -135,7 +137,7 @@
                       (.displayColor "#123456")
                       (.externalKeyId (Optional/empty))
                       (.name "US workspace")
-                      (.tags (.build (BetaWorkspace$Tags/builder)))
+                      (.tags (.build (Workspace$Tags/builder)))
                       .build)]
     (is (= {:allowed-inference-geos [:global :us]
             :default-inference-geo :global
@@ -144,13 +146,12 @@
 
 (deftest rate-limit-group-roundtrips-through-custom-conversion
   (let [rate-limit->map (private-fn 'rate-limit->map)
-        rate-limit (-> (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit/builder)
+        rate-limit (-> (com.anthropic.models.organization.ratelimits.OrganizationRateLimit/builder)
                        (.id "rl_1")
-                       (.group (-> (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimitModelGroup/builder)
+                       (.group (-> (com.anthropic.models.organization.ratelimits.OrganizationRateLimitModelGroup/builder)
                                    (.id "model-group-1")
                                    (.displayName "Claude models")
                                    (.build)))
-                       (.groupType (com.anthropic.models.beta.organization.ratelimits.BetaOrganizationRateLimit$GroupType/of "model"))
                        (.limits [])
                        (.models [])
                        (.build))]
@@ -190,3 +191,21 @@
                 remove-federation-rule-workspace]]
       (is (ifn? (ns-resolve 'anthropic.organization s))
           (str s " must be a public fn")))))
+
+(deftest get-rbac-group-round-trips-params-and-response
+  (let [[result params]
+        (support/exercise-single! :rbac-groups
+                          "com.anthropic.services.blocking.beta.organization.RbacGroupService"
+                          "com.anthropic.models.beta.organization.rbacgroups.BetaRbacGroup"
+                          #(anthropic.organization/get-rbac-group % "grp_42"))]
+    (is (= "grp_42" (.orElse (.rbacGroupId params) nil)))
+    (is (= "stub" (:id result)))
+    (is (= :stub (:source-type result)))))
+
+(deftest dynamic-static-call-picks-overload-by-argument-type
+  ;; String/valueOf has eight one-arg overloads; getMethods order is unspecified,
+  ;; so picking by arity alone returns a different one from run to run.
+  (let [call #'anthropic.organization/dynamic-static-call]
+    (is (= "ab" (call String "valueOf" (char-array "ab"))))
+    (is (= "true" (call String "valueOf" true)))
+    (is (re-find #"^java.lang.Object@" (call String "valueOf" (Object.))))))

@@ -862,10 +862,12 @@
 (defn- ->memory-store-create-params ^MemoryStoreCreateParams
   [{:keys [name description metadata]}]
   (when-not name (missing-key! :name))
+  (when-not description (missing-key! :description))
+  (when-not metadata (missing-key! :metadata))
   (let [b (MemoryStoreCreateParams/builder)]
     (.name b ^String name)
-    (when description (.description b ^String description))
-    (when metadata (.metadata b (->ms-create-metadata metadata)))
+    (.description b ^String description)
+    (.metadata b (->ms-create-metadata metadata))
     (.build b)))
 
 (defn- ->memory-store-update-params ^MemoryStoreUpdateParams
@@ -878,20 +880,19 @@
     (.build b)))
 
 (defn- memory-store->map [^BetaManagedAgentsMemoryStore r]
-  (cond-> {:id (.id r)
-           :name (.name r)
-           :created-at (str (.createdAt r))
-           :updated-at (str (.updatedAt r))
-           :type (->keyword (unopt (.asString (._type r))))}
-    (unopt (.metadata r))
-    (assoc :metadata (additional-properties->map
-                      (._additionalProperties ^com.anthropic.models.beta.memorystores.BetaManagedAgentsMemoryStore$Metadata
-                                               (unopt (.metadata r)))))
-    (unopt (.description r)) (assoc :description (unopt (.description r)))
-    (unopt (.archivedAt r)) (assoc :archived-at (str (unopt (.archivedAt r))))))
+  {:id (.id r)
+   :name (.name r)
+   :description (.description r)
+   :metadata (additional-properties->map
+              (._additionalProperties ^com.anthropic.models.beta.memorystores.BetaManagedAgentsMemoryStore$Metadata
+                                       (.metadata r)))
+   :archived-at (some-> (.archivedAt r) unopt str)
+   :created-at (str (.createdAt r))
+   :updated-at (str (.updatedAt r))
+   :type (->keyword (unopt (.asString (._type r))))})
 
 (defn create-memory-store
-  "Create a memory store: `:name` (required), `:description`, `:metadata`.
+  "Create a memory store: `:name`, `:description`, and `:metadata` are required.
   Returns the store as a map (`:id`, `:name`, `:description`, `:created-at`,
   `:updated-at`)."
   [^AnthropicClient client req]
@@ -2173,6 +2174,31 @@
             :type :id :processed-at :session-thread-id :tool-use-id :name
             :agent-name :iteration :outcome-id :is-error)))
 
+(defn- session-status-idle-payload->map
+  [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionStatusIdleEvent event]
+  (cond-> {:stop-reason (->keyword (.asString (.type (.stopReason event))))}
+    (unopt (.stopDetails event))
+    (assoc :stop-details
+           (let [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionRefusalStopDetails
+                 details (unopt (.stopDetails event))
+                 ^com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionRefusalStopDetails$Category
+                 category (unopt (.category details))]
+             {:type (->keyword (json-string (._type details)))
+              :category (->keyword (.asString category))
+              :explanation (unopt (.explanation details))}))))
+
+(defn- session-error-payload->map
+  [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionErrorEvent event]
+  (let [error (.error event)
+        result (cond-> {:type (->keyword (.asString (.type error)))
+                        :message (.message error)}
+                 (unopt (.mcpServerName error)) (assoc :mcp-server-name (unopt (.mcpServerName error)))
+                 (unopt (.repositoryUrl error)) (assoc :repository-url (unopt (.repositoryUrl error))))]
+    {:error (if (.isRepositoryClone error)
+              (assoc result :retry-status
+                     (->keyword (.asString (.type (.retryStatus (.asRepositoryClone error))))))
+              result)}))
+
 (defn- session-rubric->map
   [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserDefineOutcomeEvent$Rubric rubric]
   (cond
@@ -2313,10 +2339,10 @@
     (.isAgentThreadMessageReceived e) (merge (session-event-common->map e :agent-thread-message-received) (event-payload->map (.asAgentThreadMessageReceived e)))
     (.isAgentThreadMessageSent e) (merge (session-event-common->map e :agent-thread-message-sent) (event-payload->map (.asAgentThreadMessageSent e)))
     (.isAgentThreadContextCompacted e) (merge (session-event-common->map e :agent-thread-context-compacted) (event-payload->map (.asAgentThreadContextCompacted e)))
-    (.isSessionError e) (merge (session-event-common->map e :session-error) (event-payload->map (.asSessionError e)))
+    (.isSessionError e) (merge (session-event-common->map e :session-error) (session-error-payload->map (.asSessionError e)))
     (.isSessionStatusRescheduled e) (merge (session-event-common->map e :session-status-rescheduled) (event-payload->map (.asSessionStatusRescheduled e)))
     (.isSessionStatusRunning e) (merge (session-event-common->map e :session-status-running) (event-payload->map (.asSessionStatusRunning e)))
-    (.isSessionStatusIdle e) (merge (session-event-common->map e :session-status-idle) (event-payload->map (.asSessionStatusIdle e)))
+    (.isSessionStatusIdle e) (merge (session-event-common->map e :session-status-idle) (session-status-idle-payload->map (.asSessionStatusIdle e)))
     (.isSessionStatusTerminated e) (merge (session-event-common->map e :session-status-terminated) (event-payload->map (.asSessionStatusTerminated e)))
     (.isSessionThreadCreated e) (merge (session-event-common->map e :session-thread-created) (event-payload->map (.asSessionThreadCreated e)))
     (.isSpanOutcomeEvaluationStart e) (merge (session-event-common->map e :span-outcome-evaluation-start) (event-payload->map (.asSpanOutcomeEvaluationStart e)))
