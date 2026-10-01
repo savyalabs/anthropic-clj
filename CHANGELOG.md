@@ -5,6 +5,27 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-30
+
+### Added
+
+- Wrap beta Organization administration analytics, spend limits, RBAC, plugins,
+  plugin marketplaces, and plugin installation settings.
+- Require memory-store `:description` and `:metadata`, matching the SDK.
+- Normalize Managed Agents idle refusal stop details and repository session
+  errors as idiomatic Clojure maps.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.67.0**.
+- Move organization retrieval, compliance settings, users, external keys,
+  invites, rate limits, service accounts, workspaces, and federation issuers
+  to the SDK's GA service path. API keys and federation rules stay beta because
+  their GA models omit response fields retained by this wrapper.
+- Beta-only administration functions include `list-analytics-*`,
+  `get-spend-limit`, `delete-spend-limit`, `set-spend-limit`, `*-rbac-group`,
+  `get-rbac-role`, `list-rbac-roles`, `*-plugin`, and `*-plugin-marketplace`.
+
 ## [0.39.0] - 2026-09-28
 
 ### Added
