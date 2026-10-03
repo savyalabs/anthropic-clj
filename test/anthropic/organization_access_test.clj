@@ -3,6 +3,7 @@
             [anthropic.organization-test-support :as support]
             [clojure.test :refer [deftest is]])
   (:import (com.anthropic.core JsonValue)
+           (com.anthropic.models.beta AnthropicBeta)
            (com.anthropic.models.beta.organization.rbacgroups BetaRbacGroup
                                                               BetaRbacGroup$SourceType
                                                               RbacGroupDeleteResponse)
@@ -11,6 +12,7 @@
                                                                BetaSpendLimit$Scope
                                                                BetaSpendLimitOrganizationScope
                                                                BetaSpendLimitPeriod
+                                                               SpendLimitListParams$ScopeType
                                                                SpendLimitDeleteResponse)
            (java.time OffsetDateTime)))
 
@@ -47,6 +49,7 @@
       (.amount "1250.00")
       (.createdAt timestamp)
       (.currency "USD")
+      (.isEnabled true)
       (.period (BetaSpendLimitPeriod/of "monthly"))
       (.scope (BetaSpendLimit$Scope/ofOrganization (organization-scope)))
       (.type (JsonValue/from "spend_limit"))
@@ -76,11 +79,12 @@
                           (spend-limit)
                           #(organization/get-spend-limit % "sl_monthly_org"))]
     (is (= "sl_monthly_org" (.orElse (.spendLimitId params) nil)))
-    (is (= #{:id :amount :created-at :currency :period :scope :type :updated-at}
+    (is (= #{:id :amount :created-at :currency :is-enabled :period :scope :type :updated-at}
            (set (keys result))))
     (is (= "sl_monthly_org" (:id result)))
     (is (= "1250.00" (:amount result)))
     (is (= "USD" (:currency result)))
+    (is (= true (:is-enabled result)))
     (is (= :monthly (:period result)))
     (is (= {:type :organization} (:scope result)))
     (is (= "spend_limit" (:type result)))
@@ -114,11 +118,33 @@
            (str (.. (.scope params) asOrganization _type))))
     (is (= (BetaSpendLimitPeriod/of "monthly")
            (.orElse (.period params) nil)))
-    (is (= #{:id :amount :created-at :currency :period :scope :type :updated-at}
+    (is (= #{:id :amount :created-at :currency :is-enabled :period :scope :type :updated-at}
            (set (keys result))))
     (is (= "1250.00" (:amount result)))
+    (is (= true (:is-enabled result)))
     (is (= :monthly (:period result)))
     (is (= {:type :organization} (:scope result)))))
+
+(deftest list-spend-limits-round-trips
+  (let [[result params]
+        (exercise-list! :spend-limits []
+                        "com.anthropic.services.blocking.beta.organization.SpendLimitService"
+                        "com.anthropic.models.beta.organization.spendlimits.SpendLimitListPage"
+                        "com.anthropic.models.beta.organization.spendlimits.SpendLimitListPageResponse"
+                        (spend-limit)
+                        #(organization/list-spend-limits
+                          % {:limit 25
+                             :page "page_2"
+                             :scope-type [:organization "workspace"]
+                             :betas [:spend-limit-reads-2026-09-26]}))]
+    (is (= 25 (.orElse (.limit params) nil)))
+    (is (= "page_2" (.orElse (.page params) nil)))
+    (is (= [(SpendLimitListParams$ScopeType/of "organization")
+            (SpendLimitListParams$ScopeType/of "workspace")]
+           (.orElse (.scopeType params) nil)))
+    (is (= [(AnthropicBeta/of "spend-limit-reads-2026-09-26")]
+           (.orElse (.betas params) nil)))
+    (is (= ["sl_monthly_org" "sl_monthly_org"] (mapv :id result)))))
 
 (deftest create-rbac-group-round-trips
   (let [[result params]

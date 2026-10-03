@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-03
+
+### Added
+
+- Add `list-spend-limits` for beta Organization spend-limit administration.
+- Return the required spend-limit `:is-enabled` field.
+- Support the `:spend-limit-reads-2026-09-26` beta.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.68.0**.
+- The SDK deprecates Claude Sonnet 4.5 model constants; wrapper aliases are unchanged.
+
 ## [0.40.0] - 2026-09-30
 
 ### Added
