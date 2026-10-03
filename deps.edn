@@ -1,26 +1,26 @@
 {:paths ["src"]
 
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
-        com.anthropic/anthropic-java {:mvn/version "2.67.0"}
+        com.anthropic/anthropic-java {:mvn/version "2.68.0"}
         metosin/jsonista {:mvn/version "1.0.1"}}
 
  :aliases
  {:test
   {:extra-paths ["test"]
    :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                org.slf4j/slf4j-nop {:mvn/version "2.0.18"}
-                com.anthropic/anthropic-java-bedrock {:mvn/version "2.67.0"}
-                com.anthropic/anthropic-java-vertex {:mvn/version "2.67.0"}}
+                org.slf4j/slf4j-nop {:mvn/version "2.0.20"}
+                com.anthropic/anthropic-java-bedrock {:mvn/version "2.68.0"}
+                com.anthropic/anthropic-java-vertex {:mvn/version "2.68.0"}}
    :main-opts ["-m" "kaocha.runner"]}
 
   :bedrock
-  {:extra-deps {com.anthropic/anthropic-java-bedrock {:mvn/version "2.67.0"}}}
+  {:extra-deps {com.anthropic/anthropic-java-bedrock {:mvn/version "2.68.0"}}}
 
   :vertex
-  {:extra-deps {com.anthropic/anthropic-java-vertex {:mvn/version "2.67.0"}}}
+  {:extra-deps {com.anthropic/anthropic-java-vertex {:mvn/version "2.68.0"}}}
 
   :malli
-  {:extra-deps {metosin/malli {:mvn/version "0.20.1"}}}
+  {:extra-deps {metosin/malli {:mvn/version "0.20.2"}}}
 
   :1.10 {:override-deps {org.clojure/clojure {:mvn/version "1.10.3"}}}
   :1.11 {:override-deps {org.clojure/clojure {:mvn/version "1.11.4"}}}
