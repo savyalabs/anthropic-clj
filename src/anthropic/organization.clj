@@ -1287,6 +1287,7 @@
                 (->dynamic-params params (or opts {}))))
 
 (defn get-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "retrieve" "com.anthropic.models.beta.organization.spendlimits.SpendLimitRetrieveParams" {:spend-limit-id id})))
+(defn list-spend-limits ([client] (list-spend-limits client {})) ([client opts] (with-api-errors (admin-list client "spendLimits" "com.anthropic.models.beta.organization.spendlimits.SpendLimitListParams" opts))))
 (defn delete-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "delete" "com.anthropic.models.beta.organization.spendlimits.SpendLimitDeleteParams" {:spend-limit-id id})))
 (defn set-spend-limit [client changes] (with-api-errors (admin-call client "spendLimits" "set" "com.anthropic.models.beta.organization.spendlimits.SpendLimitSetParams" changes)))
 
