@@ -785,19 +785,26 @@
       (when tags (.tags b ^com.anthropic.models.organization.workspaces.WorkspaceUpdateParams$Tags tags))
       (workspace->map (-> (.organization client) (.workspaces) (.update (.build b)))))))
 
+(defn- ->workspace-list-params
+  ^com.anthropic.models.organization.workspaces.WorkspaceListParams
+  [{:keys [limit after-id before-id include-archived include-default]}]
+  (let [^com.anthropic.models.organization.workspaces.WorkspaceListParams$Builder b
+        (com.anthropic.models.organization.workspaces.WorkspaceListParams/builder)]
+    (when limit (.limit b (long limit)))
+    (when after-id (.afterId b ^String after-id))
+    (when before-id (.beforeId b ^String before-id))
+    (when (some? include-archived) (.includeArchived b (boolean include-archived)))
+    (when (some? include-default) (.includeDefault b (boolean include-default)))
+    (.build b)))
+
 (defn list-workspaces
   "List workspaces. Options: `:limit`, `:after-id`, `:before-id`,
-  `:include-archived`."
+  `:include-archived`, and `:include-default`."
   ([^AnthropicClient client] (list-workspaces client {}))
-  ([^AnthropicClient client {:keys [limit after-id before-id include-archived]}]
+  ([^AnthropicClient client opts]
    (with-api-errors
-     (let [b (com.anthropic.models.organization.workspaces.WorkspaceListParams/builder)]
-       (when limit (.limit b (long limit)))
-       (when after-id (.afterId b ^String after-id))
-       (when before-id (.beforeId b ^String before-id))
-       (when (some? include-archived) (.includeArchived b (boolean include-archived)))
-       (mapv workspace->map (.autoPager (-> (.organization client) (.workspaces)
-                                            (.list (.build b)))))))))
+     (mapv workspace->map (.autoPager (-> (.organization client) (.workspaces)
+                                          (.list (->workspace-list-params opts))))))))
 
 (defn archive-workspace
   "Archive a workspace by id. Returns the archived workspace."

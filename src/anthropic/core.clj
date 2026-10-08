@@ -166,6 +166,7 @@
    :claude-mythos-preview "claude-mythos-preview"
    :claude-opus-4-6 "claude-opus-4-6"
    :claude-sonnet-4-6 "claude-sonnet-4-6"
+   :claude-haiku-5-5 "claude-haiku-5-5"
    :claude-haiku-4-5 "claude-haiku-4-5"
    :claude-haiku-4-5-20251001 "claude-haiku-4-5-20251001"
    :claude-opus-4-5 "claude-opus-4-5"
@@ -1728,7 +1729,11 @@
         caps (.capabilities m)]
     (cond-> {:id (.id m)
              :display-name (.displayName m)
-             :created-at (str (.createdAt m))}
+             :created-at (str (.createdAt m))
+             :lifecycle (->keyword (.asString (.lifecycle m)))}
+      (.isPresent (.deprecatedAt m)) (assoc :deprecated-at (str (.get (.deprecatedAt m))))
+      (.isPresent (.retiresAt m)) (assoc :retires-at (str (.get (.retiresAt m))))
+      (.isPresent (.line m)) (assoc :line (->keyword (.asString (.get (.line m)))))
       (.isPresent mit) (assoc :max-input-tokens (.get mit))
       (.isPresent mt) (assoc :max-tokens (.get mt))
       (.isPresent caps) (assoc :capabilities
@@ -1737,11 +1742,14 @@
                                    normalize-content-data)))))
 
 (defn- ->model-list-params ^ModelListParams
-  [{:keys [limit before-id after-id betas]}]
+  [{:keys [limit before-id after-id lifecycle betas]}]
   (let [b (ModelListParams/builder)]
     (when limit (.limit b (long limit)))
     (when before-id (.beforeId b ^String before-id))
     (when after-id (.afterId b ^String after-id))
+    (doseq [state lifecycle]
+      (.addLifecycle b ^com.anthropic.models.models.ModelListParams$Lifecycle
+                     (com.anthropic.models.models.ModelListParams$Lifecycle/of (name state))))
     (doseq [beta betas]
       (let [^String beta-name (if (keyword? beta) (name beta) beta)]
         (.addBeta b beta-name)))
@@ -1749,10 +1757,10 @@
 
 (defn list-models
   "List the available models as a seq of maps, newest first. Each map has `:id`,
-  `:display-name`, `:created-at` (ISO-8601 string), and `:max-input-tokens` /
+  `:display-name`, `:created-at` (ISO-8601 string), `:lifecycle`, and `:max-input-tokens` /
   `:max-tokens` and `:capabilities` when the API reports them. Pages are followed
   automatically. Optional `opts`: `:limit`, `:before-id`, `:after-id`, and free-form
-  string or keyword `:betas`."
+  string or keyword `:betas`, and keyword `:lifecycle` values."
   ([^AnthropicClient client]
    (list-models client {}))
   ([^AnthropicClient client opts]

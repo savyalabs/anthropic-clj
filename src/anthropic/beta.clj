@@ -349,6 +349,9 @@
      (when-let [limit (:limit opts)] (.limit b (long limit)))
      (when-let [before-id (:before-id opts)] (.beforeId b ^String before-id))
      (when-let [after-id (:after-id opts)] (.afterId b ^String after-id))
+     (doseq [state (:lifecycle opts)]
+       (.addLifecycle b ^com.anthropic.models.beta.models.ModelListParams$Lifecycle
+                      (com.anthropic.models.beta.models.ModelListParams$Lifecycle/of (name state))))
      (doseq [beta (->beta-names (:betas opts))]
        (.addBeta b ^String beta))
      (.build b))))
@@ -370,11 +373,17 @@
   (let [fallbacks (.allowedFallbackModels m)
         caps (.capabilities m)
         mit (.maxInputTokens m)
-        mt (.maxTokens m)]
+        mt (.maxTokens m)
+        ^com.anthropic.models.beta.models.BetaModelInfo$Lifecycle lifecycle (.lifecycle m)]
     (cond-> {:id (.id m)
              :display-name (.displayName m)
              :created-at (str (.createdAt m))
+             :lifecycle (->keyword (.asString lifecycle))
              :type (->keyword (json->clj (._type m)))}
+      (.isPresent (.deprecatedAt m)) (assoc :deprecated-at (str (.get (.deprecatedAt m))))
+      (.isPresent (.retiresAt m)) (assoc :retires-at (str (.get (.retiresAt m))))
+      (.isPresent (.line m)) (assoc :line (let [^com.anthropic.models.beta.models.BetaModelLine line (.get (.line m))]
+                                             (->keyword (.asString line))))
       (.isPresent fallbacks) (assoc :allowed-fallback-models (.get fallbacks))
       (.isPresent mit) (assoc :max-input-tokens (.get mit))
       (.isPresent mt) (assoc :max-tokens (.get mt))
@@ -385,7 +394,7 @@
 
 (defn list-beta-models
   "List beta models as maps, newest first. Optional `opts` accepts `:limit`,
-  `:before-id`, `:after-id`, and free-form string or keyword `:betas`. Each map
+  `:before-id`, `:after-id`, keyword `:lifecycle`, and free-form string or keyword `:betas`. Each map
   includes the stable model keys plus `:allowed-fallback-models` and `:type`
   when the API reports them. Pages are followed automatically."
   ([^AnthropicClient client]
@@ -1258,8 +1267,51 @@
     (when timezone (.timezone b ^String timezone))
     (.build b)))
 
+(defn- ->web-fetch-url-source-all []
+  (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceAll/builder)
+      (.type (JsonValue/from "all")) (.build)))
+
+(defn- ->web-fetch-url-source-none []
+  (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceNone/builder)
+      (.type (JsonValue/from "none")) (.build)))
+
+(defn- ->web-fetch-user-input ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceUserInputParams
+  [value]
+  (let [type (if (keyword? value) value (:type value))]
+    (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceUserInputParams/ofBetaManagedAgentsWebFetchUrlSourceUserInput
+     (case type
+       :all (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceUserInput/ofAll (->web-fetch-url-source-all))
+       :none (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceUserInput/ofNone (->web-fetch-url-source-none))
+       (throw (ex-info "Unsupported web-fetch URL source type"
+                       {:anthropic/error :unsupported-web-fetch-url-source-type :type type}))))))
+
+(defn- ->web-fetch-tool-filter ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilterParams
+  [value]
+  (let [{:keys [type tools]} (if (keyword? value) {:type value} value)
+        ^java.util.List refs (mapv #(com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolReference/of ^String (:name %)) tools)]
+    (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilterParams/ofBetaManagedAgentsWebFetchUrlSourceToolFilter
+     (case type
+       :all (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilter/ofAll (->web-fetch-url-source-all))
+       :none (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilter/ofNone (->web-fetch-url-source-none))
+       :only (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilter/ofOnly refs)
+       :except (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilter/ofExcept refs)
+       (throw (ex-info "Unsupported web-fetch URL source type"
+                       {:anthropic/error :unsupported-web-fetch-url-source-type :type type}))))))
+
+(defn- ->web-fetch-url-sources
+  "Translate Managed Agents `:url-sources`: `{:user-input :all|:none,
+  :client-tool-results / :server-tool-results :all | :none |
+  {:type :only|:except :tools [{:name \"...\"}]}}`."
+  [sources]
+  (let [^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourcesParams$Builder b
+        (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourcesParams/builder)]
+    (when-let [v (:user-input sources)] (.userInput b (->web-fetch-user-input v)))
+    (when-let [v (:client-tool-results sources)] (.clientToolResults b (->web-fetch-tool-filter v)))
+    (when-let [v (:server-tool-results sources)] (.serverToolResults b (->web-fetch-tool-filter v)))
+    (.build b)))
+
 (defn- ->agent-tool-config ^com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams
-  [{:keys [tool enabled permission-policy allowed-domains blocked-domains user-location] :as config-map}]
+  [{:keys [tool enabled permission-policy allowed-domains blocked-domains user-location url-sources] :as config-map}]
   (case tool
     :bash
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofBash
@@ -1329,7 +1381,8 @@
        (.build b)))
     :web-fetch
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofWebFetch
-     (let [b (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams/builder)]
+     (let [^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams$Builder b
+           (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams/builder)]
        (.enabled b (boolean enabled))
        (when permission-policy
          (case (:type permission-policy)
@@ -1338,6 +1391,7 @@
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
        (when (contains? config-map :allowed-domains) (.allowedDomains b ^java.util.List (vec allowed-domains)))
        (when (contains? config-map :blocked-domains) (.blockedDomains b ^java.util.List (vec blocked-domains)))
+       (when (contains? config-map :url-sources) (.urlSources b ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourcesParams (->web-fetch-url-sources url-sources)))
        (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams$Type/of "web_fetch"))
        (.build b)))
     :web-search
@@ -1602,6 +1656,25 @@
     (unopt (.country location)) (assoc :country (unopt (.country location)))
     (unopt (.timezone location)) (assoc :timezone (unopt (.timezone location)))))
 
+(defn- web-fetch-url-sources->map [^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources sources]
+  (let [user-input (fn [^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceUserInput v]
+                     (cond (.isAll v) {:type :all}
+                           (.isNone v) {:type :none}))
+        tool-filter (fn [^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolFilter v]
+                      (cond
+                        (.isAll v) {:type :all}
+                        (.isNone v) {:type :none}
+                        (.isOnly v) {:type :only
+                                     :tools (mapv #(hash-map :type :tool-reference :name (.name ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolReference %))
+                                                 (unopt (.tools v)))}
+                        (.isExcept v) {:type :except
+                                       :tools (mapv #(hash-map :type :tool-reference :name (.name ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolReference %))
+                                                   (unopt (.tools v)))}))]
+    (cond-> {}
+      (unopt (.userInput sources)) (assoc :user-input (user-input (unopt (.userInput sources))))
+      (unopt (.clientToolResults sources)) (assoc :client-tool-results (tool-filter (unopt (.clientToolResults sources))))
+      (unopt (.serverToolResults sources)) (assoc :server-tool-results (tool-filter (unopt (.serverToolResults sources)))))))
+
 (defn- agent-tool-config->map
   [^com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfig c]
   (case (->keyword (.asString (.type c)))
@@ -1634,7 +1707,8 @@
       (cond-> {:tool :web-fetch :enabled (.enabled config)
                :permission-policy (permission-policy->map (.permissionPolicy config))}
         (unopt (.allowedDomains config)) (assoc :allowed-domains (vec (unopt (.allowedDomains config))))
-        (unopt (.blockedDomains config)) (assoc :blocked-domains (vec (unopt (.blockedDomains config))))))
+        (unopt (.blockedDomains config)) (assoc :blocked-domains (vec (unopt (.blockedDomains config))))
+        (unopt (.urlSources config)) (assoc :url-sources (web-fetch-url-sources->map ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources (unopt (.urlSources config))))))
     :web-search
     (let [^com.anthropic.models.beta.agents.BetaManagedAgentsWebSearchToolConfig config (.asWebSearch c)]
       (cond-> {:tool :web-search :enabled (.enabled config)

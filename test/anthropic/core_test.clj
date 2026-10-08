@@ -133,11 +133,12 @@
 
 (deftest named-model-keywords
   (testing "public model aliases expose the verified SDK model ids"
-    (is (= 20 (count a/models)))
+    (is (= 21 (count a/models)))
     (is (= "claude-fable-5-1" (:claude-fable-5-1 a/models)))
     (is (= "claude-mythos-5-1" (:claude-mythos-5-1 a/models)))
     (is (= "claude-opus-5" (:claude-opus-5 a/models)))
     (is (= "claude-sonnet-5-5" (:claude-sonnet-5-5 a/models)))
+    (is (= "claude-haiku-5-5" (:claude-haiku-5-5 a/models)))
     (is (= "claude-opus-4-8" (:claude-opus-4-8 a/models))))
   (testing "a keyword model builds the same message params as its string id"
     (let [req {:max-tokens 512 :messages [{:role :user :content "hi"}]}
@@ -1273,6 +1274,10 @@
     (doto b
       (.id id) (.displayName display-name)
       (.createdAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
+      (.lifecycle (com.anthropic.models.models.ModelInfo$Lifecycle/of "active"))
+      (.deprecatedAt empty-opt)
+      (.retiresAt empty-opt)
+      (.line empty-opt)
       (.type (com.anthropic.core.JsonValue/from "model"))
       (.capabilities empty-opt)
       (.maxInputTokens ^java.util.Optional (if mit (java.util.Optional/of (long mit)) empty-opt))
@@ -1384,6 +1389,7 @@
   (let [m (model->map (model-info "claude-x" "Claude X" 200000 64000))]
     (is (= "claude-x" (:id m)))
     (is (= "Claude X" (:display-name m)))
+    (is (= :active (:lifecycle m)))
     (is (= 200000 (:max-input-tokens m)))
     (is (= 64000 (:max-tokens m)))
     (is (string? (:created-at m)))
@@ -1391,7 +1397,32 @@
   (testing "absent optional token limits are omitted"
     (let [m (model->map (model-info "claude-y" "Claude Y" nil nil))]
       (is (not (contains? m :max-input-tokens)))
-      (is (not (contains? m :max-tokens))))))
+      (is (not (contains? m :max-tokens)))
+      (is (not (contains? m :deprecated-at)))
+      (is (not (contains? m :retires-at)))
+      (is (not (contains? m :line))))))
+
+(deftest model-mapping-includes-lifecycle-dates-and-line
+  (let [deprecated-at (java.time.OffsetDateTime/parse "2026-08-01T00:00:00Z")
+        retires-at (java.time.OffsetDateTime/parse "2026-12-01T00:00:00Z")
+        model (-> (ModelInfo/builder)
+                  (.id "claude-sonnet-1")
+                  (.displayName "Claude Sonnet 1")
+                  (.createdAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
+                  (.lifecycle (com.anthropic.models.models.ModelInfo$Lifecycle/of "deprecated"))
+                  (.deprecatedAt deprecated-at)
+                  (.retiresAt retires-at)
+                  (.line (com.anthropic.models.models.ModelLine/of "sonnet"))
+                  (.type (JsonValue/from "model"))
+                  (.capabilities empty-opt)
+                  (.maxInputTokens empty-opt)
+                  (.maxTokens empty-opt)
+                  (.build))
+        m (model->map model)]
+    (is (= :deprecated (:lifecycle m)))
+    (is (= "2026-08-01T00:00Z" (:deprecated-at m)))
+    (is (= "2026-12-01T00:00Z" (:retires-at m)))
+    (is (= :sonnet (:line m)))))
 
 (deftest model-capabilities-and-list-options
   (testing "all stable capabilities are returned as nested Clojure data"
@@ -1407,8 +1438,12 @@
                       :image_input {:supported true}
                       :pdf_input {:supported true}
                       :structured_outputs {:supported true}
+                      :server_tools {:supported true
+                                     :code_execution {:supported true}
+                                     :web_search {:supported false}}
                       :thinking {:supported true
                                  :types {:adaptive {:supported true}
+                                         :disabled {:supported false}
                                          :enabled {:supported true}}}})
           caps (.readValue (com.anthropic.core.JsonValue/access$getJSON_MAPPER$cp)
                            caps-json
@@ -1417,6 +1452,10 @@
                    (.id "claude-capable")
                    (.displayName "Claude Capable")
                    (.createdAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
+                   (.lifecycle (com.anthropic.models.models.ModelInfo$Lifecycle/of "active"))
+                   (.deprecatedAt empty-opt)
+                   (.retiresAt empty-opt)
+                   (.line empty-opt)
                    (.type (com.anthropic.core.JsonValue/from "model"))
                    (.capabilities caps)
                    (.maxInputTokens empty-opt)
@@ -1428,15 +1467,19 @@
       (is (= true (get-in c [:context-management :compact-20260112 :supported])))
       (is (= false (get-in c [:effort :max :supported])))
       (is (= true (get-in c [:thinking :types :adaptive :supported])))
+      (is (= false (get-in c [:thinking :types :disabled :supported])))
+      (is (= true (get-in c [:server-tools :code-execution :supported])))
       (is (= #{:batch :citations :code-execution :context-management :effort
-               :image-input :pdf-input :structured-outputs :thinking}
+               :image-input :pdf-input :server-tools :structured-outputs :thinking}
              (set (keys c))))))
   (testing "list-models accepts the stable pagination options"
     (let [p (->model-list-params {:limit 25 :before-id "before" :after-id "after"
+                                  :lifecycle [:active :deprecated]
                                   :betas ["beta-one" :beta-two]})]
       (is (= 25 (opt (.limit p))))
       (is (= "before" (opt (.beforeId p))))
       (is (= "after" (opt (.afterId p))))
+      (is (= ["active" "deprecated"] (mapv #(.asString %) (opt (.lifecycle p)))))
       (is (= ["beta-one" "beta-two"] (mapv str (opt (.betas p)))))
       (is (some #{'[client opts]} (:arglists (meta #'a/list-models)))))))
 
