@@ -33,6 +33,7 @@
   (-> (BetaRbacRole/builder)
       (.id "role_developer")
       (.createdAt timestamp)
+      (.displayName "Developer role")
       (.name "Developer")
       (.type (JsonValue/from "rbac_role"))
       (.updatedAt timestamp)
@@ -111,13 +112,16 @@
                           "com.anthropic.services.blocking.beta.organization.SpendLimitService"
                           (spend-limit)
                           #(organization/set-spend-limit
-                            % {:amount "1250.00" :scope scope :period :monthly}))]
+                            % {:amount "1250.00" :scope scope :period :monthly
+                               :betas [:spend-limit-reads-2026-09-26]}))]
     (is (= "1250.00" (.orElse (.amount params) nil)))
     (is (.isOrganization (.scope params)))
     (is (= "organization"
            (str (.. (.scope params) asOrganization _type))))
     (is (= (BetaSpendLimitPeriod/of "monthly")
            (.orElse (.period params) nil)))
+    (is (= [(AnthropicBeta/of "spend-limit-reads-2026-09-26")]
+           (.orElse (.betas params) nil)))
     (is (= #{:id :amount :created-at :currency :is-enabled :period :scope :type :updated-at}
            (set (keys result))))
     (is (= "1250.00" (:amount result)))
@@ -241,9 +245,10 @@
                           (rbac-role)
                           #(organization/get-rbac-role % "role_developer"))]
     (is (= "role_developer" (.orElse (.rbacRoleId params) nil)))
-    (is (= #{:id :created-at :name :type :updated-at} (set (keys result))))
+    (is (= #{:id :created-at :display-name :name :type :updated-at} (set (keys result))))
     (is (= "role_developer" (:id result)))
     (is (= "Developer" (:name result)))
+    (is (= "Developer role" (:display-name result)))
     (is (= "rbac_role" (:type result)))
     (is (= "2026-09-30T12:34:56Z" (:created-at result)))
     (is (= "2026-09-30T12:34:56Z" (:updated-at result)))))
@@ -260,9 +265,10 @@
     (is (= 25 (.orElse (.limit params) nil)))
     (is (= "page_2" (.orElse (.page params) nil)))
     (is (= 2 (count result)))
-    (is (= #{:id :created-at :name :type :updated-at} (set (keys first-role))))
+    (is (= #{:id :created-at :display-name :name :type :updated-at} (set (keys first-role))))
     (is (= "role_developer" (:id first-role)))
     (is (= "Developer" (:name first-role)))
+    (is (= "Developer role" (:display-name first-role)))
     (is (= "rbac_role" (:type first-role)))
     (is (= "2026-09-30T12:34:56Z" (:created-at first-role)))
     (is (= "2026-09-30T12:34:56Z" (:updated-at first-role)))))

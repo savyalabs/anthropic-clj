@@ -5,6 +5,21 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-07
+
+### Added
+
+- Add the `:claude-haiku-5-5` model alias.
+- Expose stable and beta model lifecycle metadata, model lines, lifecycle filtering,
+  server-tool capabilities, and disabled thinking support.
+- Support `:include-default` when listing workspaces and RBAC role display names.
+- Support spend-limit betas and Managed Agents web-fetch URL-source filters.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.70.0**, covering
+  2.69.0 and 2.70.0.
+
 ## [0.41.0] - 2026-10-03
 
 ### Added

@@ -236,12 +236,14 @@
 (deftest beta-model-list-params-are-wired
   (let [f (private-fn '->beta-model-list-params)
         p (when f (f {:limit 7 :before-id "before" :after-id "after"
+                      :lifecycle [:active :deprecated]
                       :betas [:beta-one "beta-two"]}))]
     (is (some? p) "beta model list params must be built")
     (when p
       (is (= 7 (opt (.limit p))))
       (is (= "before" (opt (.beforeId p))))
       (is (= "after" (opt (.afterId p))))
+      (is (= ["active" "deprecated"] (mapv #(.asString %) (opt (.lifecycle p)))))
       (is (= ["beta-one" "beta-two"]
              (mapv #(.asString %) (opt (.betas p))))))))
 
@@ -265,23 +267,29 @@
                    (.medium support) (.xhigh (Optional/of support))
                    (.supported true) (.build))
         thinking-types (-> (BetaThinkingTypes/builder)
-                           (.adaptive support) (.enabled support) (.build))
+                           (.adaptive support) (.disabled support) (.enabled support) (.build))
         thinking (-> (BetaThinkingCapability/builder)
                      (.supported true) (.types thinking-types) (.build))
         compaction (-> (BetaCompactionCapability/builder)
                        (.summarize support) (.supported true) (.build))
+        server-tools (-> (com.anthropic.models.beta.models.BetaServerToolsCapability/builder)
+                         (.codeExecution support) (.webSearch support) (.supported true) (.build))
         capabilities (-> (BetaModelCapabilities/builder)
                          (.batch support) (.citations support)
                          (.codeExecution support) (.contextManagement context)
                          (.compaction compaction)
                          (.effort effort) (.imageInput support)
-                         (.pdfInput support) (.structuredOutputs support)
+                         (.pdfInput support) (.serverTools server-tools) (.structuredOutputs support)
                          (.thinking thinking)
                          (.build))
         model (-> (BetaModelInfo/builder)
                   (.id "model_1")
                   (.displayName "Beta Model")
                   (.createdAt (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z"))
+                  (.lifecycle (com.anthropic.models.beta.models.BetaModelInfo$Lifecycle/of "active"))
+                  (.deprecatedAt (Optional/empty))
+                  (.retiresAt (Optional/empty))
+                  (.line (Optional/empty))
                   (.allowedFallbackModels ["fallback_1"])
                   (.capabilities capabilities)
                   (.maxInputTokens 200000)
@@ -293,6 +301,7 @@
     (is (= {:id "model_1"
             :display-name "Beta Model"
             :created-at "2026-07-04T00:00Z"
+            :lifecycle :active
             :allowed-fallback-models ["fallback_1"]
             :max-input-tokens 200000
             :max-tokens 64000
@@ -313,12 +322,39 @@
                                     :supported true}
                            :image-input {:supported true}
                            :pdf-input {:supported true}
+                           :server-tools {:code-execution {:supported true}
+                                          :web-search {:supported true}
+                                          :supported true}
                            :structured-outputs {:supported true}
                            :thinking {:supported true
                                       :types {:adaptive {:supported true}
+                                              :disabled {:supported true}
                                               :enabled {:supported true}}}}
             :type :model}
            actual))))
+
+(deftest beta-model-mapping-includes-lifecycle-dates-and-line
+  (let [deprecated-at (java.time.OffsetDateTime/parse "2026-08-01T00:00:00Z")
+        retires-at (java.time.OffsetDateTime/parse "2026-12-01T00:00:00Z")
+        model (-> (BetaModelInfo/builder)
+                  (.id "claude-sonnet-1")
+                  (.displayName "Claude Sonnet 1")
+                  (.createdAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
+                  (.lifecycle (com.anthropic.models.beta.models.BetaModelInfo$Lifecycle/of "deprecated"))
+                  (.deprecatedAt deprecated-at)
+                  (.retiresAt retires-at)
+                  (.line (com.anthropic.models.beta.models.BetaModelLine/of "sonnet"))
+                  (.type (JsonValue/from "model"))
+                  (.allowedFallbackModels (Optional/empty))
+                  (.capabilities (Optional/empty))
+                  (.maxInputTokens (Optional/empty))
+                  (.maxTokens (Optional/empty))
+                  (.build))
+        m (invoke-private 'beta-model->map model)]
+    (is (= :deprecated (:lifecycle m)))
+    (is (= "2026-08-01T00:00Z" (:deprecated-at m)))
+    (is (= "2026-12-01T00:00Z" (:retires-at m)))
+    (is (= :sonnet (:line m)))))
 
 (deftest every-beta-list-builder-is-wired
   (doseq [name '[->skill-list-params ->version-list-params
@@ -828,6 +864,81 @@
                                                     :permission-policy {:type :auto}}})]
       (is (true? (some-> toolset .configs opt first .permissionPolicy opt .isAuto)))
       (is (true? (some-> toolset .defaultConfig opt .permissionPolicy opt .isAuto))))))
+
+(deftest managed-agent-web-fetch-url-source-params
+  (let [build-sources #(some-> (invoke-private '->agent-tool-config
+                                               {:tool :web-fetch :enabled true :url-sources %})
+                              .asWebFetch .urlSources opt)
+        user-input #(some-> % .userInput opt .asBetaManagedAgentsWebFetchUrlSourceUserInput)
+        tool-filter #(some-> % .clientToolResults opt .asBetaManagedAgentsWebFetchUrlSourceToolFilter)
+        server-tool-filter #(some-> % .serverToolResults opt .asBetaManagedAgentsWebFetchUrlSourceToolFilter)
+        user-all (user-input (build-sources {:user-input :all}))
+        user-none (user-input (build-sources {:user-input {:type :none}}))
+        client-all (tool-filter (build-sources {:client-tool-results :all}))
+        client-none (tool-filter (build-sources {:client-tool-results {:type :none}}))
+        server-only (server-tool-filter (build-sources {:server-tool-results {:type :only :tools [{:name "browser"}]}}))
+        server-except (server-tool-filter (build-sources {:server-tool-results {:type :except :tools [{:name "web-search"}]}}))
+        all-sources (build-sources {:user-input :all
+                                    :client-tool-results :none
+                                    :server-tool-results {:type :only :tools [{:name "browser"}]}})]
+    (is (= true (.isAll user-all)))
+    (is (= true (.isNone user-none)))
+    (is (= true (.isAll client-all)))
+    (is (= true (.isNone client-none)))
+    (is (= true (.isOnly server-only)))
+    (is (= ["browser"] (mapv #(.name %) (.tools (.asOnly server-only)))))
+    (is (= true (.isExcept server-except)))
+    (is (= ["web-search"] (mapv #(.name %) (.tools (.asExcept server-except)))))
+    (is (= true (.isAll (user-input all-sources))))
+    (is (= true (.isNone (tool-filter all-sources))))
+    (is (= true (.isOnly (server-tool-filter all-sources))))))
+
+(deftest managed-agent-web-fetch-url-source-rejects-unknown-type
+  (is (= {:anthropic/error :unsupported-web-fetch-url-source-type :type :unknown}
+         (ex-data-for #(invoke-private '->agent-tool-config
+                                       {:tool :web-fetch :enabled true
+                                        :url-sources {:user-input {:type :unknown}}}))))
+  (is (= {:anthropic/error :unsupported-web-fetch-url-source-type :type :unknown}
+         (ex-data-for #(invoke-private '->agent-tool-config
+                                       {:tool :web-fetch :enabled true
+                                        :url-sources {:client-tool-results {:type :unknown}}})))))
+
+(deftest managed-agent-web-fetch-url-source-response-maps
+  (let [all (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceAll/builder)
+                (.type (JsonValue/from "all")) (.build))
+        none (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceNone/builder)
+                 (.type (JsonValue/from "none")) (.build))
+        ref (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceToolReference/builder)
+                (.name "browser") (.type (JsonValue/from "tool_reference")) (.build))
+        only (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceOnly/builder)
+                 (.tools [ref]) (.type (JsonValue/from "only")) (.build))
+        except (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourceExcept/builder)
+                   (.tools [ref]) (.type (JsonValue/from "except")) (.build))
+        map-sources #(invoke-private 'web-fetch-url-sources->map %)]
+    (is (= {:user-input {:type :all}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.clientToolResults (Optional/empty)) (.serverToolResults (Optional/empty))
+                            (.userInput all) (.build)))))
+    (is (= {:user-input {:type :none}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.clientToolResults (Optional/empty)) (.serverToolResults (Optional/empty))
+                            (.userInput none) (.build)))))
+    (is (= {:client-tool-results {:type :all}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.serverToolResults (Optional/empty)) (.userInput (Optional/empty))
+                            (.clientToolResults all) (.build)))))
+    (is (= {:client-tool-results {:type :none}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.serverToolResults (Optional/empty)) (.userInput (Optional/empty))
+                            (.clientToolResults none) (.build)))))
+    (is (= {:client-tool-results {:type :only :tools [{:type :tool-reference :name "browser"}]}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.serverToolResults (Optional/empty)) (.userInput (Optional/empty))
+                            (.clientToolResults only) (.build)))))
+    (is (= {:client-tool-results {:type :except :tools [{:type :tool-reference :name "browser"}]}}
+           (map-sources (-> (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSources/builder)
+                            (.serverToolResults (Optional/empty)) (.userInput (Optional/empty))
+                            (.clientToolResults except) (.build)))))))
 
 (deftest agents-platform-request-param-parity
   (let [^AgentCreateParams agent-create (->agent-create-params

@@ -111,6 +111,7 @@
                             {:data [{:type "model" :id "model-contract"
                                      :display_name "Contract model"
                                      :created_at "2025-01-01T00:00:00Z"
+                                     :lifecycle "active"
                                      :max_input_tokens 100
                                      :max_tokens 20}]
                              :has_more false})))
@@ -123,6 +124,7 @@
                    (is (= [{:id "model-contract"
                           :display-name "Contract model"
                           :created-at "2025-01-01T00:00Z"
+                          :lifecycle :active
                           :max-input-tokens 100
                           :max-tokens 20}]
                         models))))))

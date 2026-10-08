@@ -22,6 +22,15 @@
   (let [v (ns-resolve 'anthropic.organization sym)]
     (when v @v)))
 
+(deftest workspace-list-params-support-include-default
+  (let [build-params (private-fn '->workspace-list-params)
+        true-params (build-params {:include-default true})
+        false-params (build-params {:include-default false})
+        absent-params (build-params {})]
+    (is (= true (.orElse (.includeDefault true-params) nil)))
+    (is (= false (.orElse (.includeDefault false-params) nil)))
+    (is (= nil (.orElse (.includeDefault absent-params) nil)))))
+
 (deftest workspace-rate-limit-list-params-support-inherited-rates
   (let [build-params (private-fn '->workspace-rate-limit-list-params)]
     (is (some? build-params))
