@@ -5,6 +5,25 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-09
+
+### Added
+
+- Support the Managed Agents `:multiagent-20261001` agent form, workflow-run
+  session events, workflow-run thread IDs, inline thread agents, and thread
+  status filtering.
+- Surface Chat/Cowork unified analytics fields returned by the SDK.
+
+### Fixed
+
+- `list-session-events` threw `ClassCastException` on events whose extra
+  fields are read from the event JSON (agent messages, tool use and results,
+  thread messages, session status and span events). They convert again.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **2.71.0**.
+
 ## [0.42.0] - 2026-10-07
 
 ### Added

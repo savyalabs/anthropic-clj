@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.42.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.43.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.42.0"]
+[net.clojars.savya/anthropic-clj "0.43.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -55,7 +55,7 @@ Set `ANTHROPIC_API_KEY` in your environment, or pass client options:
 - `:configure` - receives the raw SDK builder last, for anything not wrapped
   here (interceptors, a custom `jsonMapper`, or a Bedrock/Vertex `backend`)
 
-Tracks [`com.anthropic/anthropic-java` 2.70.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.70.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 2.71.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.71.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -495,6 +495,24 @@ maps-in/maps-out shape and error contract as `anthropic.core`:
 (beta/stream-session-events client (:id session) {}
                             (fn [ev] (println (:type ev))))
 ```
+
+Agent create and update requests retain the coordinator roster form and also
+support `:multiagent-20261001`:
+
+```clojure
+{:multiagent {:type :multiagent-20261001
+              :advisor {:enabled true :model "claude-opus-5-5"}
+              :subagents {:enabled true
+                          :predefined-agents ["agent_123" :self
+                                              {:id "agent_456" :version 2}]
+                          :inline-agents {:enabled true}}
+              :workflows {:enabled true
+                          :predefined-agents ["agent_123"]
+                          :inline-agents {:enabled false}}}}
+```
+
+`list-session-threads` accepts an optional options map with `:statuses`, such
+as `{:statuses [:idle :running]}`.
 
 Webhook parsing covers agent, deployment, session, environment, and memory-store
 events. `stream-session-events` and `stream-thread-events` open SSE streams over
