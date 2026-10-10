@@ -12,7 +12,7 @@
             [clojure.string :as str]
             [clojure.walk :as walk])
   (:import (com.anthropic.client AnthropicClient)
-           (com.anthropic.core JsonValue MultipartField UnwrapWebhookParams)
+           (com.anthropic.core JsonValue MultipartField ObjectMappers UnwrapWebhookParams)
            (com.anthropic.core.http Headers HttpResponse StreamResponse)
            (com.anthropic.errors AnthropicException)
            (com.anthropic.models.beta.skills BetaSkill
@@ -69,6 +69,9 @@
                                              BetaManagedAgentsAgent$Tool
                                              BetaManagedAgentsAdvisor
                                              BetaManagedAgentsAgentReference
+                                             BetaManagedAgentsMultiagentCoordinator
+                                             BetaManagedAgentsMultiagentCoordinator$Agent
+                                             BetaManagedAgentsMultiagentCoordinatorParams
                                              BetaManagedAgentsMultiagentSelfParams
                                              BetaManagedAgentsMultiagentSelfParams$Type
                                              BetaManagedAgentsSessionThreadAgent
@@ -93,9 +96,7 @@
                                                BetaManagedAgentsAdvisorParams
                                                BetaManagedAgentsSession
                                                BetaManagedAgentsMultiagent
-                                               BetaManagedAgentsMultiagent$Agent
                                                BetaManagedAgentsMultiagentParams
-                                               BetaManagedAgentsMultiagentParams$Type
                                                BetaManagedAgentsMultiagentRosterEntryParams
                                                BetaManagedAgentsAdvisorParams$Type
                                                BetaManagedAgentsAgentParams$Type
@@ -1477,13 +1478,119 @@
                     {:anthropic/error :unknown-multiagent-roster-entry
                      :entry entry}))))
 
+(defn- ->multiagent-self ^BetaManagedAgentsMultiagentSelfParams []
+  (-> (BetaManagedAgentsMultiagentSelfParams/builder)
+      (.type (BetaManagedAgentsMultiagentSelfParams$Type/of "self"))
+      (.build)))
+
+(defn- ->multiagent-predefined-agent
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams
+  [entry]
+  (cond
+    (string? entry)
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams/ofString ^String entry)
+
+    (= :self entry)
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams/ofSelf
+     (->multiagent-self))
+
+    (and (map? entry) (= :self (:type entry)))
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams/ofSelf
+     (->multiagent-self))
+
+    (map? entry)
+    (let [b (BetaManagedAgentsAgentParams/builder)]
+      (.id b ^String (:id entry))
+      (when (:version entry) (.version b (int (:version entry))))
+      (.type b (BetaManagedAgentsAgentParams$Type/of "agent"))
+      (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams/ofBetaManagedAgentsAgentParams
+       (.build b)))
+
+    :else
+    (throw (ex-info (str "Unknown multiagent predefined agent " entry)
+                    {:anthropic/error :unknown-multiagent-predefined-agent
+                     :entry entry}))))
+
+(defn- ->multiagent-inline-agents
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsParams
+  [{:keys [enabled]}]
+  (if enabled
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsParams/ofEnabled
+     (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsEnabledParams/builder)
+         (.type (JsonValue/from "enabled"))
+         (.build)))
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsParams/ofDisabled
+     (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsDisabledParams/builder)
+         (.type (JsonValue/from "disabled"))
+         (.build)))))
+
+(defn- ->multiagent-subagents
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsParams
+  [{:keys [enabled predefined-agents inline-agents]}]
+  (if enabled
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsParams/ofEnabled
+     (let [b (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsEnabledParams/builder)]
+       (.type b (JsonValue/from "enabled"))
+       (doseq [agent predefined-agents]
+         (.addPredefinedAgent b (->multiagent-predefined-agent agent)))
+       (when inline-agents (.inlineAgents b (->multiagent-inline-agents inline-agents)))
+       (.build b)))
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsParams/ofDisabled
+     (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsDisabledParams/builder)
+         (.type (JsonValue/from "disabled"))
+         (.build)))))
+
+(defn- ->multiagent-workflows
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsParams
+  [{:keys [enabled predefined-agents inline-agents]}]
+  (if enabled
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsParams/ofEnabled
+     (let [b (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsEnabledParams/builder)]
+       (.type b (JsonValue/from "enabled"))
+       (doseq [agent predefined-agents]
+         (.addPredefinedAgent b (->multiagent-predefined-agent agent)))
+       (when inline-agents (.inlineAgents b (->multiagent-inline-agents inline-agents)))
+       (.build b)))
+    (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsParams/ofDisabled
+     (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsDisabledParams/builder)
+         (.type (JsonValue/from "disabled"))
+         (.build)))))
+
+(defn- ->multiagent-20261001
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagent20261001Params
+  [{:keys [advisor subagents workflows]}]
+  (let [b (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagent20261001Params/builder)]
+    (.type b (JsonValue/from "multiagent_20261001"))
+    (when advisor
+      (.advisor b
+                (if (:enabled advisor)
+                  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisorParams/ofEnabled
+                   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisorEnabledParams/builder)
+                       (.model ^String (:model advisor))
+                       (.type (JsonValue/from "enabled"))
+                       (.build)))
+                  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisorParams/ofDisabled
+                   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisorDisabledParams/builder)
+                       (.type (JsonValue/from "disabled"))
+                       (.build))))))
+    (when subagents (.subagents b (->multiagent-subagents subagents)))
+    (when workflows (.workflows b (->multiagent-workflows workflows)))
+    (.build b)))
+
 (defn- ->agent-multiagent ^BetaManagedAgentsMultiagentParams
-  [{:keys [type agents]}]
-  (let [b (BetaManagedAgentsMultiagentParams/builder)]
-    (.type b (BetaManagedAgentsMultiagentParams$Type/of (name type)))
+  [{:keys [type agents] :as multiagent}]
+  (case type
+    :coordinator
+    (let [b (BetaManagedAgentsMultiagentCoordinatorParams/builder)]
+      (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinatorParams$Type/of "coordinator"))
     (doseq [entry agents]
       (.addAgent b (->agent-roster-entry entry)))
-    (.build b)))
+      (BetaManagedAgentsMultiagentParams/ofCoordinator (.build b)))
+    :multiagent-20261001
+    (BetaManagedAgentsMultiagentParams/ofMultiagent20261001
+     (->multiagent-20261001 multiagent))
+    (throw (ex-info (str "Unknown multiagent type " type)
+                    {:anthropic/error :unknown-multiagent-type :type type}))))
 
 (defn- ->managed-agent-model-config ^BetaManagedAgentsModelConfigParams [model effort inference-geo speed]
   (let [b (BetaManagedAgentsModelConfigParams/builder)]
@@ -1757,9 +1864,50 @@
 
 (declare ^:private agent-ref->map)
 
+(defn- multiagent-inline-agents->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgents r]
+  {:enabled (.isEnabled r)})
+
+(defn- multiagent-advisor->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisor r]
+  (if (.isEnabled r)
+    {:enabled true :model (.model (.asEnabled r))}
+    {:enabled false}))
+
+(defn- multiagent-subagents->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagents r]
+  (if (.isEnabled r)
+    (let [enabled (.asEnabled r)]
+      {:enabled true
+       :predefined-agents (mapv agent-ref->map (.predefinedAgents enabled))
+       :inline-agents (multiagent-inline-agents->map (.inlineAgents enabled))})
+    {:enabled false}))
+
+(defn- multiagent-workflows->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflows r]
+  (if (.isEnabled r)
+    (let [enabled (.asEnabled r)]
+      {:enabled true
+       :predefined-agents (mapv agent-ref->map (.predefinedAgents enabled))
+       :inline-agents (multiagent-inline-agents->map (.inlineAgents enabled))})
+    {:enabled false}))
+
+(defn- multiagent-20261001->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsMultiagent20261001 r]
+  {:type :multiagent-20261001
+   :advisor (multiagent-advisor->map (.advisor r))
+   :subagents (multiagent-subagents->map (.subagents r))
+   :workflows (multiagent-workflows->map (.workflows r))})
+
 (defn- multiagent->map [^BetaManagedAgentsMultiagent r]
-  {:type (keyword (.asString (.type r)))
-   :agents (mapv agent-ref->map (.agents r))})
+  (cond
+    (.isCoordinator r)
+    (let [^BetaManagedAgentsMultiagentCoordinator coordinator (.asCoordinator r)]
+      {:type (keyword (.asString (.type coordinator)))
+       :agents (mapv agent-ref->map (.agents coordinator))})
+    (.isMultiagent20261001 r)
+    (multiagent-20261001->map (.asMultiagent20261001 r))
+    :else {:type :unknown}))
 
 (defn- agent->map [^BetaManagedAgentsAgent r]
   (cond-> {:id (.id r)
@@ -1944,10 +2092,32 @@
     (unopt (.description r)) (assoc :description (unopt (.description r)))
     (unopt (.system r)) (assoc :system (unopt (.system r)))
     (unopt (.multiagent r)) (assoc :multiagent
-                                   (let [^com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentCoordinator m
+                                   (let [^com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagent m
                                          (unopt (.multiagent r))]
-                                     {:type (->keyword (.asString (.type m)))
-                                      :agents (mapv agent-ref->map (.agents m))}))))
+                                     (cond
+                                       (.isCoordinator m)
+                                       (let [coordinator (.asCoordinator m)]
+                                         {:type (->keyword (.asString (.type coordinator)))
+                                          :agents (mapv agent-ref->map (.agents coordinator))})
+                                       (.isMultiagent20261001 m)
+                                       (let [r (.asMultiagent20261001 m)]
+                                         {:type :multiagent-20261001
+                                          :advisor (multiagent-advisor->map (.advisor r))
+                                          :subagents (let [subagents (.subagents r)]
+                                                       (if (.isEnabled subagents)
+                                                         (let [enabled (.asEnabled subagents)]
+                                                           {:enabled true
+                                                            :predefined-agents (mapv agent-ref->map (.predefinedAgents enabled))
+                                                            :inline-agents (multiagent-inline-agents->map (.inlineAgents enabled))})
+                                                         {:enabled false}))
+                                          :workflows (let [workflows (.workflows r)]
+                                                       (if (.isEnabled workflows)
+                                                         (let [enabled (.asEnabled workflows)]
+                                                           {:enabled true
+                                                            :predefined-agents (mapv agent-ref->map (.predefinedAgents enabled))
+                                                            :inline-agents (multiagent-inline-agents->map (.inlineAgents enabled))})
+                                                         {:enabled false}))})
+                                       :else {:type :unknown})))))
 
 (defn- outcome-evaluation->map [^com.anthropic.models.beta.sessions.BetaManagedAgentsOutcomeEvaluationResource r]
   (cond-> {:type (keyword (.asString (.type r)))
@@ -1981,22 +2151,44 @@
 (defn- advisor->map [^BetaManagedAgentsAdvisor a]
   {:type :advisor :model (.model a)})
 
+(defn- inline-agent->map
+  [^com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent r]
+  (cond-> {:type :inline
+           :name (.name r)
+           :model (.asString (.id ^BetaManagedAgentsModelConfig (.model r)))
+           :mcp-servers (mapv mcp-server->map (.mcpServers r))
+           :skills (mapv (fn [^com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent$Skill s]
+                           {:type (if (.isAnthropic s) :anthropic :custom)
+                            :skill-id (.skillId s)
+                            :version (.version s)})
+                         (.skills r))
+           :tools (mapv (fn [^com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent$Tool t]
+                          (cond
+                            (.isCustom t) (agent-tool-payload->map (.asCustom t))
+                            (.isMcpToolset t) (agent-tool-payload->map (.asMcpToolset t))
+                            (.isAgentToolset20260401 t) (agent-tool-payload->map (.asAgentToolset20260401 t))
+                            :else {:type :unknown}))
+                        (.tools r))}
+    (unopt (.description r)) (assoc :description (unopt (.description r)))
+    (unopt (.system r)) (assoc :system (unopt (.system r)))))
+
 (defn- agent-ref->map
   "An agent slot is a union of an agent reference and an advisor. The union
    wrapper is per-parent, so the bare reference types are accepted too."
   [r]
   (cond
-    (instance? BetaManagedAgentsMultiagent$Agent r)
-    (let [^BetaManagedAgentsMultiagent$Agent u r]
+    (instance? BetaManagedAgentsMultiagentCoordinator$Agent r)
+    (let [^BetaManagedAgentsMultiagentCoordinator$Agent u r]
       (if (.isAdvisor u)
         (advisor->map (.asAdvisor u))
         (agent-ref->map (.asAgent u))))
 
     (instance? BetaManagedAgentsSessionThread$Agent r)
     (let [^BetaManagedAgentsSessionThread$Agent u r]
-      (if (.isAdvisor u)
-        (advisor->map (.asAdvisor u))
-        (agent-ref->map (.asAgent u))))
+      (cond
+        (.isAdvisor u) (advisor->map (.asAdvisor u))
+        (.isInline u) (inline-agent->map (.asInline u))
+        :else (agent-ref->map (.asAgent u))))
 
     (instance? BetaManagedAgentsAdvisor r)
     (advisor->map r)
@@ -2239,8 +2431,17 @@
     (unopt (.outcomeId e)) (assoc :outcome-id (unopt (.outcomeId e)))
     (unopt (.isError e)) (assoc :is-error (unopt (.isError e)))))
 
-(defn- event-payload->map [^BetaManagedAgentsSessionEvent event]
-  (let [m (json->clj (._json event))]
+(defn- event-json
+  "The raw JSON of an event union. Events built in-process carry none, so
+   serialize them."
+  ^JsonValue [raw event]
+  (or (unopt raw)
+      (JsonValue/fromJsonNode (.valueToTree (ObjectMappers/jsonMapper) event))))
+
+(defn- event-payload->map
+  "Event fields not covered by `session-event-common->map`."
+  [^BetaManagedAgentsSessionEvent event]
+  (let [m (json->clj (event-json (._json event) event))]
     (dissoc (walk/postwalk (fn [x]
                              (if (keyword? x)
                                (keyword (str/replace (name x) "_" "-"))
@@ -2397,37 +2598,44 @@
     (.isUserCustomToolResult e) (merge (session-event-common->map e :user-custom-tool-result)
                                       (user-custom-tool-result-payload->map (.asUserCustomToolResult e)))
     (.isAgentCustomToolUse e) (merge (session-event-common->map e :agent-custom-tool-use)
-                                     (event-payload->map (.asAgentCustomToolUse e)))
+                                     (event-payload->map e))
     (.isAgentMessage e) (merge (session-event-common->map e :agent-message)
-                               (event-payload->map (.asAgentMessage e)))
+                               (event-payload->map e))
     (.isAgentThinking e) (merge (session-event-common->map e :agent-thinking)
-                                (event-payload->map (.asAgentThinking e)))
+                                (event-payload->map e))
     (.isAgentMcpToolUse e) (merge (session-event-common->map e :agent-mcp-tool-use)
-                                  (event-payload->map (.asAgentMcpToolUse e)))
+                                  (event-payload->map e))
     (.isAgentMcpToolResult e) (merge (session-event-common->map e :agent-mcp-tool-result)
-                                    (event-payload->map (.asAgentMcpToolResult e)))
+                                    (event-payload->map e))
     (.isAgentToolUse e) (merge (session-event-common->map e :agent-tool-use)
-                               (event-payload->map (.asAgentToolUse e)))
+                               (event-payload->map e))
     (.isAgentToolResult e) (merge (session-event-common->map e :agent-tool-result)
-                                  (event-payload->map (.asAgentToolResult e)))
-    (.isAgentThreadMessageReceived e) (merge (session-event-common->map e :agent-thread-message-received) (event-payload->map (.asAgentThreadMessageReceived e)))
-    (.isAgentThreadMessageSent e) (merge (session-event-common->map e :agent-thread-message-sent) (event-payload->map (.asAgentThreadMessageSent e)))
-    (.isAgentThreadContextCompacted e) (merge (session-event-common->map e :agent-thread-context-compacted) (event-payload->map (.asAgentThreadContextCompacted e)))
+                                  (event-payload->map e))
+    (.isAgentThreadMessageReceived e) (merge (session-event-common->map e :agent-thread-message-received) (event-payload->map e))
+    (.isAgentThreadMessageSent e) (merge (session-event-common->map e :agent-thread-message-sent) (event-payload->map e))
+    (.isAgentThreadContextCompacted e) (merge (session-event-common->map e :agent-thread-context-compacted) (event-payload->map e))
     (.isSessionError e) (merge (session-event-common->map e :session-error) (session-error-payload->map (.asSessionError e)))
-    (.isSessionStatusRescheduled e) (merge (session-event-common->map e :session-status-rescheduled) (event-payload->map (.asSessionStatusRescheduled e)))
-    (.isSessionStatusRunning e) (merge (session-event-common->map e :session-status-running) (event-payload->map (.asSessionStatusRunning e)))
+    (.isSessionStatusRescheduled e) (merge (session-event-common->map e :session-status-rescheduled) (event-payload->map e))
+    (.isSessionStatusRunning e) (merge (session-event-common->map e :session-status-running) (event-payload->map e))
     (.isSessionStatusIdle e) (merge (session-event-common->map e :session-status-idle) (session-status-idle-payload->map (.asSessionStatusIdle e)))
-    (.isSessionStatusTerminated e) (merge (session-event-common->map e :session-status-terminated) (event-payload->map (.asSessionStatusTerminated e)))
-    (.isSessionThreadCreated e) (merge (session-event-common->map e :session-thread-created) (event-payload->map (.asSessionThreadCreated e)))
-    (.isSpanOutcomeEvaluationStart e) (merge (session-event-common->map e :span-outcome-evaluation-start) (event-payload->map (.asSpanOutcomeEvaluationStart e)))
-    (.isSpanOutcomeEvaluationEnd e) (merge (session-event-common->map e :span-outcome-evaluation-end) (event-payload->map (.asSpanOutcomeEvaluationEnd e)))
-    (.isSpanModelRequestStart e) (merge (session-event-common->map e :span-model-request-start) (event-payload->map (.asSpanModelRequestStart e)))
-    (.isSpanModelRequestEnd e) (merge (session-event-common->map e :span-model-request-end) (event-payload->map (.asSpanModelRequestEnd e)))
-    (.isSpanOutcomeEvaluationOngoing e) (merge (session-event-common->map e :span-outcome-evaluation-ongoing) (event-payload->map (.asSpanOutcomeEvaluationOngoing e)))
-    (.isSessionDeleted e) (merge (session-event-common->map e :session-deleted) (event-payload->map (.asSessionDeleted e)))
-    (.isSessionThreadStatusRunning e) (merge (session-event-common->map e :session-thread-status-running) (event-payload->map (.asSessionThreadStatusRunning e)))
-    (.isSessionThreadStatusIdle e) (merge (session-event-common->map e :session-thread-status-idle) (event-payload->map (.asSessionThreadStatusIdle e)))
-    (.isSessionThreadStatusTerminated e) (merge (session-event-common->map e :session-thread-status-terminated) (event-payload->map (.asSessionThreadStatusTerminated e)))
+    (.isSessionStatusTerminated e) (merge (session-event-common->map e :session-status-terminated) (event-payload->map e))
+    (.isSessionThreadCreated e) (merge (session-event-common->map e :session-thread-created) (event-payload->map e))
+    (.isSpanOutcomeEvaluationStart e) (merge (session-event-common->map e :span-outcome-evaluation-start) (event-payload->map e))
+    (.isSpanOutcomeEvaluationEnd e) (merge (session-event-common->map e :span-outcome-evaluation-end) (event-payload->map e))
+    (.isSpanModelRequestStart e) (merge (session-event-common->map e :span-model-request-start) (event-payload->map e))
+    (.isSpanModelRequestEnd e) (merge (session-event-common->map e :span-model-request-end) (event-payload->map e))
+    (.isSpanOutcomeEvaluationOngoing e) (merge (session-event-common->map e :span-outcome-evaluation-ongoing) (event-payload->map e))
+    (.isSessionDeleted e) (merge (session-event-common->map e :session-deleted) (event-payload->map e))
+    (.isSessionThreadStatusRunning e) (merge (session-event-common->map e :session-thread-status-running) (event-payload->map e))
+    (.isSessionThreadStatusIdle e) (merge (session-event-common->map e :session-thread-status-idle) (event-payload->map e))
+    (.isSessionThreadStatusTerminated e) (merge (session-event-common->map e :session-thread-status-terminated) (event-payload->map e))
+    (.isWorkflowRunCreated e) (merge (session-event-common->map e :workflow-run-created) (event-payload->map e))
+    (.isWorkflowRunError e) (merge (session-event-common->map e :workflow-run-error) (event-payload->map e))
+    (.isWorkflowRunPhaseStarted e) (merge (session-event-common->map e :workflow-run-phase-started) (event-payload->map e))
+    (.isWorkflowRunPhaseEnded e) (merge (session-event-common->map e :workflow-run-phase-ended) (event-payload->map e))
+    (.isWorkflowRunStatusRunning e) (merge (session-event-common->map e :workflow-run-status-running) (event-payload->map e))
+    (.isWorkflowRunStatusIdle e) (merge (session-event-common->map e :workflow-run-status-idle) (event-payload->map e))
+    (.isWorkflowRunStatusEnded e) (merge (session-event-common->map e :workflow-run-status-ended) (event-payload->map e))
     (.isUserToolResult e) (merge (session-event-common->map e :user-tool-result)
                                  (user-tool-result-payload->map (.asUserToolResult e)))
     (.isSessionThreadStatusRescheduled e) (session-event-common->map e :session-thread-status-rescheduled)
@@ -2510,9 +2718,9 @@
 
 (extend-protocol StreamEventJson
   com.anthropic.models.beta.sessions.events.BetaManagedAgentsStreamSessionEvents
-  (stream-event-json [event] (unopt (._json event)))
+  (stream-event-json [event] (event-json (._json event) event))
   com.anthropic.models.beta.sessions.threads.BetaManagedAgentsStreamSessionThreadEvents
-  (stream-event-json [event] (unopt (._json event))))
+  (stream-event-json [event] (event-json (._json event) event)))
 
 (defn- stream-event->map [event]
   (let [m (json->clj (stream-event-json event))]
@@ -2627,10 +2835,16 @@
     (.threadId b ^String thread-id)
     (.build b)))
 
-(defn- ->thread-list-params ^ThreadListParams [session-id]
+(defn- ->thread-list-params
+  (^ThreadListParams [session-id] (->thread-list-params session-id {}))
+  (^ThreadListParams [session-id {:keys [statuses]}]
   (let [b (ThreadListParams/builder)]
     (.sessionId b ^String session-id)
-    (.build b)))
+    (when statuses
+      (.statuses b ^java.util.List
+                 (mapv #(com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadStatus/of
+                         (-> % name (str/replace "-" "_"))) statuses)))
+    (.build b))))
 
 (defn- ->thread-archive-params ^ThreadArchiveParams [session-id thread-id]
   (let [b (ThreadArchiveParams/builder)]
@@ -2655,6 +2869,7 @@
     (unopt (.archivedAt r)) (assoc :archived-at (str (unopt (.archivedAt r))))
     (unopt (.usage r)) (assoc :usage (usage->map (unopt (.usage r))))
     (unopt (.stats r)) (assoc :stats (session-thread-stats->map (unopt (.stats r))))
+    (unopt (.workflowRunId r)) (assoc :workflow-run-id (unopt (.workflowRunId r)))
     (.type r) (assoc :type (->keyword (.asString (.type r))))))
 
 (defn get-session-thread
@@ -2666,11 +2881,13 @@
 
 (defn list-session-threads
   "List session threads (pages followed) for a session."
-  [^AnthropicClient client ^String session-id]
-  (with-api-errors
-    (let [^ThreadListPage p (-> (.beta client) (.sessions) (.threads)
-                                (.list (->thread-list-params session-id)))]
-      (mapv session-thread->map (.autoPager p)))))
+  ([^AnthropicClient client ^String session-id]
+   (list-session-threads client session-id {}))
+  ([^AnthropicClient client ^String session-id opts]
+   (with-api-errors
+     (let [^ThreadListPage p (-> (.beta client) (.sessions) (.threads)
+                                 (.list (->thread-list-params session-id opts)))]
+       (mapv session-thread->map (.autoPager p))))))
 
 (defn archive-session-thread
   "Archive a session thread by session id and thread id."

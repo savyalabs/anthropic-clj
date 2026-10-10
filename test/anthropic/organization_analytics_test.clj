@@ -33,6 +33,39 @@
       (is (keyword? (get item key))))
     (is (= expected-value (get item value-key)))))
 
+(deftest analytics-chat-cowork-unified-fields-convert
+  (let [summary
+        (-> (support/sdk-model
+             "com.anthropic.models.beta.organization.analytics.BetaAnalyticsSingleDayActivitySummary")
+            (.toBuilder)
+            (.chatCoworkUnifiedDailyActiveUserCount 11)
+            (.chatCoworkUnifiedMonthlyActiveUserCount 22)
+            (.chatCoworkUnifiedWeeklyActiveUserCount 33)
+            (.build))
+        chat (-> (support/sdk-model
+                  "com.anthropic.models.beta.organization.analytics.BetaAnalyticsChatCoworkUnifiedChatMetrics")
+                 (.toBuilder)
+                 (.messageCount 44)
+                 (.thinkingMessageCount 55)
+                 (.build))
+        unified (-> (support/sdk-model
+                     "com.anthropic.models.beta.organization.analytics.BetaAnalyticsUserActivity$ChatCoworkUnifiedMetrics")
+                    (.toBuilder)
+                    (.chat chat)
+                    (.build))
+        result (-> (support/sdk-model
+                    "com.anthropic.models.beta.organization.analytics.BetaAnalyticsUserActivity")
+                   (.toBuilder)
+                   (.chatCoworkUnifiedMetrics unified)
+                   (.build))
+        summary-map (#'organization/obj->clj summary)
+        result-map (#'organization/obj->clj result)]
+    (is (= 11 (:chat-cowork-unified-daily-active-user-count summary-map)))
+    (is (= 22 (:chat-cowork-unified-monthly-active-user-count summary-map)))
+    (is (= 33 (:chat-cowork-unified-weekly-active-user-count summary-map)))
+    (is (= 44 (get-in result-map [:chat-cowork-unified-metrics :chat :message-count])))
+    (is (= 55 (get-in result-map [:chat-cowork-unified-metrics :chat :thinking-message-count])))))
+
 (deftest list-analytics-summaries-round-trips
   (let [[result params]
         (support/exercise-list!

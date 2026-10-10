@@ -1,6 +1,7 @@
 (ns anthropic.beta-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string]
+            [clojure.walk]
             [anthropic.beta :as beta])
   (:import (com.anthropic.models.beta.skills BetaSkill
                                              BetaSkillSource
@@ -477,12 +478,149 @@
       (is (contains? data :anthropic/error)))
     (is false "->session-list-params must reject unknown enum values")))
 
-(defn- agent-ref ^BetaManagedAgentsAgentReference []
-  (-> (BetaManagedAgentsAgentReference/builder)
-      (.id "agent_1")
-      (.version 1)
+(defn- agent-ref
+  (^BetaManagedAgentsAgentReference [] (agent-ref "agent_1" 1))
+  (^BetaManagedAgentsAgentReference [id version]
+   (-> (BetaManagedAgentsAgentReference/builder)
+      (.id id)
+      (.version version)
       (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgentReference$Type/of "agent"))
+      (.build))))
+
+(defn- managed-agent-model []
+  (-> (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig/builder)
+      (.id (com.anthropic.models.beta.agents.BetaManagedAgentsModel/of "claude-opus-5-5"))
       (.build)))
+
+(defn- session-thread-agent [id version]
+  (-> (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent/builder)
+      (.id id)
+      (.description (java.util.Optional/empty))
+      (.system (java.util.Optional/empty))
+      (.mcpServers [])
+      (.model (managed-agent-model))
+      (.name (str id " name"))
+      (.skills [])
+      (.tools [])
+      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent$Type/of "agent"))
+      (.version version)
+      (.build)))
+
+(defn- inline-agents-enabled []
+  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgents/ofEnabled
+   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentInlineAgentsEnabled/builder)
+       (.type (JsonValue/from "enabled"))
+       (.build))))
+
+(defn- disabled-workflows []
+  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflows/ofDisabled
+   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsDisabled/builder)
+       (.type (JsonValue/from "disabled"))
+       (.build))))
+
+(defn- enabled-advisor []
+  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisor/ofEnabled
+   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentAdvisorEnabled/builder)
+       (.model "claude-opus-5-5")
+       (.type (JsonValue/from "enabled"))
+       (.build))))
+
+(defn- expected-multiagent-20261001 []
+  {:type :multiagent-20261001
+   :advisor {:enabled true :model "claude-opus-5-5"}
+   :subagents {:enabled true
+               :predefined-agents [{:type :agent :id "agent_123" :version 1}
+                                   {:type :agent :id "agent_456" :version 2}]
+               :inline-agents {:enabled true}}
+   :workflows {:enabled false}})
+
+(defn- agent-response [multiagent]
+  (let [ts (java.time.OffsetDateTime/parse "2026-10-09T00:00:00Z")]
+    (-> (BetaManagedAgentsAgent/builder)
+        (.id "agent_1")
+        (.description "helps")
+        (.system "be helpful")
+        (.archivedAt (java.util.Optional/empty))
+        (.createdAt ts)
+        (.mcpServers [])
+        (.metadata (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Metadata/builder)
+                       (.build)))
+        (.model (managed-agent-model))
+        (.multiagent multiagent)
+        (.name "helper")
+        (.skills [])
+        (.tools [])
+        (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Type/of "agent"))
+        (.updatedAt ts)
+        (.version 1)
+        (.build))))
+
+(defn- session-agent-response [multiagent]
+  (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent/builder)
+      (.id "agent_1")
+      (.description "helps")
+      (.system "be helpful")
+      (.mcpServers [])
+      (.model (managed-agent-model))
+      (.multiagent multiagent)
+      (.name "helper")
+      (.skills [])
+      (.tools [])
+      (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Type/of "agent"))
+      (.version 1)
+      (.build)))
+
+(defn- workflow-run-events []
+  (let [processed-at (java.time.OffsetDateTime/parse "2026-10-09T00:00:00Z")
+        phase (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunPhase/builder)
+                  (.id "phase_1") (.name "plan") (.description "make a plan") (.build))
+        created (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunCreatedEvent/builder)
+                    (.id "evt_created") (.name "workflow") (.description "runs the plan") (.phases [phase])
+                    (.processedAt processed-at) (.type (JsonValue/from "workflow_run_created"))
+                    (.workflowRunId "workflow_1") (.build))
+        error (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunErrorEvent/builder)
+                  (.id "evt_error")
+                  (.error (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunError/ofProgram "program failed"))
+                  (.processedAt processed-at) (.type (JsonValue/from "workflow_run_error"))
+                  (.workflowRunId "workflow_1") (.build))
+        phase-started (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunPhaseStartedEvent/builder)
+                          (.id "evt_phase_started") (.processedAt processed-at)
+                          (.type (JsonValue/from "workflow_run_phase_started"))
+                          (.workflowRunId "workflow_1") (.workflowRunPhaseId "phase_1") (.build))
+        phase-ended (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunPhaseEndedEvent/builder)
+                        (.id "evt_phase_ended") (.phaseStartedId "evt_phase_started") (.processedAt processed-at)
+                        (.type (JsonValue/from "workflow_run_phase_ended"))
+                        (.workflowRunId "workflow_1") (.workflowRunPhaseId "phase_1") (.build))
+        running (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunStatusRunningEvent/builder)
+                    (.id "evt_running") (.processedAt processed-at)
+                    (.type (JsonValue/from "workflow_run_status_running"))
+                    (.workflowRunId "workflow_1") (.build))
+        idle (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunStatusIdleEvent/builder)
+                 (.id "evt_idle") (.processedAt processed-at)
+                 (.type (JsonValue/from "workflow_run_status_idle"))
+                 (.workflowRunId "workflow_1") (.build))
+        ended (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunStatusEndedEvent/builder)
+                  (.id "evt_ended") (.processedAt processed-at)
+                  (.result (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunResult/ofError
+                            (com.anthropic.models.beta.sessions.events.BetaManagedAgentsWorkflowRunError/ofProgram "result failed")))
+                  (.type (JsonValue/from "workflow_run_status_ended"))
+                  (.workflowRunId "workflow_1") (.build))]
+    [[:workflow-run-created created {:workflow-run-id "workflow_1"
+                                     :phases [{:id "phase_1" :name "plan"
+                                               :description "make a plan"}]}]
+     [:workflow-run-error error {:workflow-run-id "workflow_1"
+                                 :error {:type "program_error" :message "program failed"}}]
+     [:workflow-run-phase-started phase-started {:workflow-run-id "workflow_1"
+                                                 :workflow-run-phase-id "phase_1"}]
+     [:workflow-run-phase-ended phase-ended {:workflow-run-id "workflow_1"
+                                             :workflow-run-phase-id "phase_1"
+                                             :phase-started-id "evt_phase_started"}]
+     [:workflow-run-status-running running {:workflow-run-id "workflow_1"}]
+     [:workflow-run-status-idle idle {:workflow-run-id "workflow_1"}]
+     [:workflow-run-status-ended ended {:workflow-run-id "workflow_1"
+                                        :result {:type "error"
+                                                 :error {:type "program_error"
+                                                         :message "result failed"}}}]]))
 
 (defn- agent-message-event [id]
   (-> (BetaManagedAgentsAgentMessageEvent/builder)
@@ -1007,7 +1145,7 @@
       (is (= "https://x.test" (.url repository)))
       (is (nil? (opt (.authorizationToken repository)))))))
 
-(deftest agent-multiagent-params
+(deftest agent-create-multiagent-coordinator-still-builds
   (let [multiagent {:type :coordinator
                     :agents ["agent_1"
                              {:type :agent :id "agent_2"}
@@ -1020,20 +1158,22 @@
         ^AgentUpdateParams update (->agent-update-params "agent_0"
                                                          {:multiagent multiagent})
         ^com.anthropic.models.beta.sessions.BetaManagedAgentsMultiagentParams cm
-        (opt (.multiagent create))]
-    (is (= "coordinator" (.asString (.type cm))))
-    (is (= 5 (count (.agents cm))))
-    (let [entries (.agents cm)]
+        (opt (.multiagent create))
+        coordinator (.asCoordinator cm)]
+    (is (.isCoordinator cm))
+    (is (= "coordinator" (.asString (.type coordinator))))
+    (is (= 5 (count (.agents coordinator))))
+    (let [entries (.agents coordinator)]
       (is (= "agent_1" (.asString (first entries))))
       (is (= "agent_2" (.id (.asAgent (nth entries 1)))))
       (is (nil? (opt (.version (.asAgent (nth entries 1))))))
       (is (= 4 (opt (.version (.asAgent (nth entries 2))))))
       (is (= "agent_3" (.id (.asAgent (nth entries 2))))))
     (is (some? (opt (.multiagent update))))
-    (is (some #(.isString %) (.agents cm)))
-    (is (some #(.isAgent %) (.agents cm)))
-    (is (some #(.isSelf %) (.agents cm)))
-    (is (some #(.isAdvisor %) (.agents cm)))))
+    (is (some #(.isString %) (.agents coordinator)))
+    (is (some #(.isAgent %) (.agents coordinator)))
+    (is (some #(.isSelf %) (.agents coordinator)))
+    (is (some #(.isAdvisor %) (.agents coordinator)))))
 
 (deftest agent-multiagent-unknown-roster-entry
   (let [f (ns-resolve 'anthropic.beta '->agent-roster-entry)]
@@ -1042,6 +1182,66 @@
       (is (= :unknown-multiagent-roster-entry
              (:anthropic/error
               (ex-data-for #(f (Object.)))))))))
+
+(def ^:private multiagent-20261001
+  {:type :multiagent-20261001
+   :advisor {:enabled true :model "claude-opus-5-5"}
+   :subagents {:enabled true
+               :predefined-agents ["agent_123" :self {:id "agent_456" :version 2}]
+               :inline-agents {:enabled true}}
+   :workflows {:enabled true
+               :predefined-agents ["agent_123"]
+               :inline-agents {:enabled false}}})
+
+(deftest agent-create-multiagent-20261001-builds
+  (let [^AgentCreateParams params
+        (->agent-create-params {:name "helper" :model "claude-opus-5-5"
+                                :multiagent multiagent-20261001})
+        multiagent (opt (.multiagent params))
+        form (.asMultiagent20261001 multiagent)
+        advisor (.asEnabled (opt (.advisor form)))
+        subagents (.asEnabled (opt (.subagents form)))
+        workflows (.asEnabled (opt (.workflows form)))
+        predefined (.orElse (.predefinedAgents subagents) [])
+        workflow-predefined (.orElse (.predefinedAgents workflows) [])]
+    (is (.isMultiagent20261001 multiagent))
+    (is (= "claude-opus-5-5" (.model advisor)))
+    (is (= "agent_123" (.asString (first predefined))))
+    (is (.isSelf (second predefined)))
+    (is (= "agent_456" (.id (.asBetaManagedAgentsAgentParams (nth predefined 2)))))
+    (is (= 2 (opt (.version (.asBetaManagedAgentsAgentParams (nth predefined 2))))))
+    (is (.isEnabled (opt (.inlineAgents subagents))))
+    (is (= "agent_123" (.asString (first workflow-predefined))))
+    (is (.isDisabled (opt (.inlineAgents workflows))))))
+
+(deftest agent-update-multiagent-20261001-builds
+  (let [^AgentUpdateParams params (->agent-update-params "agent_1" {:multiagent multiagent-20261001})
+        form (.asMultiagent20261001 (opt (.multiagent params)))
+        subagents (.asEnabled (opt (.subagents form)))
+        workflows (.asEnabled (opt (.workflows form)))]
+    (is (= "claude-opus-5-5" (.model (.asEnabled (opt (.advisor form))))))
+    (is (= "agent_123" (.asString (first (.orElse (.predefinedAgents subagents) [])))))
+    (is (.isEnabled (opt (.inlineAgents subagents))))
+    (is (.isDisabled (opt (.inlineAgents workflows))))))
+
+(deftest agent-multiagent-disabled-variants-build
+  (let [params (->agent-create-params
+                {:name "helper" :model "claude-opus-5-5"
+                 :multiagent {:type :multiagent-20261001
+                              :advisor {:enabled false}
+                              :subagents {:enabled false}
+                              :workflows {:enabled false}}})
+        form (.asMultiagent20261001 (opt (.multiagent params)))]
+    (is (.isDisabled (opt (.advisor form))))
+    (is (.isDisabled (opt (.subagents form))))
+    (is (.isDisabled (opt (.workflows form))))))
+
+(deftest agent-multiagent-unknown-type-throws
+  (is (= :unknown-multiagent-type
+         (:anthropic/error
+          (ex-data-for #(->agent-create-params
+                         {:name "helper" :model "claude-opus-5-5"
+                          :multiagent {:type :unsupported}}))))))
 
 (deftest session-params
   (let [^SessionCreateParams p (->session-create-params
@@ -1351,6 +1551,11 @@
     (is (= "sess_1" (.sessionId ap)))
     (is (= "thread_1" (opt (.threadId ap))))))
 
+(deftest thread-list-statuses-reach-params
+  (let [^ThreadListParams params (->thread-list-params "sess_1" {:statuses [:idle :running]})]
+    (is (= ["idle" "running"]
+           (mapv #(.asString %) (opt (.statuses params)))))))
+
 (deftest memory-params
   (let [^MemoryCreateParams cp (->memory-create-params
                                 "ms_1" {:path "/notes/a.md"
@@ -1552,16 +1757,17 @@
 
 (deftest agent-response-mapping
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
-        multiagent (-> (BetaManagedAgentsMultiagent/builder)
-                       (.agents [(com.anthropic.models.beta.sessions.BetaManagedAgentsMultiagent$Agent/ofAgent
-                                  (agent-ref))
-                                 (com.anthropic.models.beta.sessions.BetaManagedAgentsMultiagent$Agent/ofAdvisor
-                                  (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
-                                      (.model "claude-opus-4-8")
-                                      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
-                                      (.build)))])
-                       (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsMultiagent$Type/of "coordinator"))
-                       (.build))
+        multiagent (BetaManagedAgentsMultiagent/ofCoordinator
+                    (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator/builder)
+                        (.agents [(com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAgent
+                                   (agent-ref))
+                                  (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAdvisor
+                                   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
+                                       (.model "claude-opus-4-8")
+                                       (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
+                                       (.build)))])
+                        (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Type/of "coordinator"))
+                        (.build)))
         r (-> (BetaManagedAgentsAgent/builder)
               (.id "agent_1")
               (.archivedAt (java.util.Optional/empty))
@@ -1666,12 +1872,49 @@
                                                         :multiagent (:multiagent m)})
           ^com.anthropic.models.beta.sessions.BetaManagedAgentsMultiagentParams rtm
           (opt (.multiagent rt))
-          entries (.agents rtm)]
-      (is (= "coordinator" (.asString (.type rtm))))
+          coordinator (.asCoordinator rtm)
+          entries (.agents coordinator)]
+      (is (= "coordinator" (.asString (.type coordinator))))
       (is (= 2 (count entries)))
       (is (= "agent_1" (.id (.asAgent (first entries)))))
       (is (= 1 (opt (.version (.asAgent (first entries))))))
       (is (= "claude-opus-4-8" (.model (.asAdvisor (second entries))))))))
+
+(deftest agent-multiagent-20261001-round-trips
+  (let [subagents
+        (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagents/ofEnabled
+         (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentSubagentsEnabled/builder)
+             (.inlineAgents (inline-agents-enabled))
+             (.predefinedAgents [(agent-ref "agent_123" 1) (agent-ref "agent_456" 2)])
+             (.type (JsonValue/from "enabled"))
+             (.build)))
+        form (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagent20261001/builder)
+                 (.advisor (enabled-advisor))
+                 (.subagents subagents)
+                 (.workflows (disabled-workflows))
+                 (.type (JsonValue/from "multiagent_20261001"))
+                 (.build))
+        multiagent (BetaManagedAgentsMultiagent/ofMultiagent20261001 form)]
+    (is (= (expected-multiagent-20261001)
+           (:multiagent (agent->map (agent-response multiagent)))))))
+
+(deftest agent-multiagent-coordinator-round-trips
+  (let [multiagent
+        (BetaManagedAgentsMultiagent/ofCoordinator
+         (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator/builder)
+             (.agents [(com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAgent
+                       (agent-ref "agent_123" 2))
+                      (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAdvisor
+                       (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
+                           (.model "claude-opus-5-5")
+                           (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
+                           (.build)))])
+             (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Type/of "coordinator"))
+             (.build)))]
+    (is (= {:type :coordinator
+            :agents [{:type :agent :id "agent_123" :version 2}
+                     {:type :advisor :model "claude-opus-5-5"}]}
+           (:multiagent (agent->map (agent-response multiagent)))))))
 
 (deftest session-agent-model-config-response-mapping
   (let [model (-> (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig/builder)
@@ -1703,6 +1946,29 @@
     (is (= "eu" (:inference-geo m)))
     (is (= :fast (:speed m)))))
 
+(deftest session-agent-multiagent-20261001-round-trips
+  (let [multiagent
+        (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagent/ofMultiagent20261001
+         (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagent20261001/builder)
+             (.advisor (enabled-advisor))
+             (.subagents
+              (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentSubagents/ofEnabled
+               (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentSubagentsEnabled/builder)
+                   (.inlineAgents (inline-agents-enabled))
+                   (.predefinedAgents [(session-thread-agent "agent_123" 1)
+                                       (session-thread-agent "agent_456" 2)])
+                   (.type (JsonValue/from "enabled"))
+                   (.build))))
+             (.workflows
+              (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentWorkflows/ofDisabled
+               (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentWorkflowsDisabled/builder)
+                   (.type (JsonValue/from "disabled"))
+                   (.build))))
+             (.type (JsonValue/from "multiagent_20261001"))
+             (.build)))]
+    (is (= (expected-multiagent-20261001)
+           (:multiagent (session-agent->map (session-agent-response multiagent)))))))
+
 (deftest session-event-response-mapping
   (let [event (BetaManagedAgentsSessionEvent/ofUserMessage
                (-> (BetaManagedAgentsUserMessageEvent/builder)
@@ -1731,6 +1997,60 @@
     (is (= {:data []} (send-session-events->map sent)))
     (is (= {:data [{:type :user-message :id "evt_2" :content ["hi"]}]}
            (send-session-events->map sent-with-data)))))
+
+(deftest workflow-run-events-convert
+  (doseq [[type event expected] (workflow-run-events)]
+    (let [mapped (session-event->map
+                  (case type
+                    :workflow-run-created (BetaManagedAgentsSessionEvent/ofWorkflowRunCreated event)
+                    :workflow-run-error (BetaManagedAgentsSessionEvent/ofWorkflowRunError event)
+                    :workflow-run-phase-started (BetaManagedAgentsSessionEvent/ofWorkflowRunPhaseStarted event)
+                    :workflow-run-phase-ended (BetaManagedAgentsSessionEvent/ofWorkflowRunPhaseEnded event)
+                    :workflow-run-status-running (BetaManagedAgentsSessionEvent/ofWorkflowRunStatusRunning event)
+                    :workflow-run-status-idle (BetaManagedAgentsSessionEvent/ofWorkflowRunStatusIdle event)
+                    :workflow-run-status-ended (BetaManagedAgentsSessionEvent/ofWorkflowRunStatusEnded event)))]
+      (is (= type (:type mapped)))
+      (is (= expected (select-keys mapped (keys expected)))))))
+
+(deftest session-event-from-json-keeps-payload
+  (let [event (.readValue (com.anthropic.core.ObjectMappers/jsonMapper)
+                          (str "{\"type\":\"session.thread_created\",\"id\":\"evt_1\","
+                               "\"processed_at\":\"2026-10-09T00:00:00Z\","
+                               "\"session_thread_id\":\"thread_1\",\"agent_name\":\"helper\"}")
+                          BetaManagedAgentsSessionEvent)]
+    (is (= {:type :session-thread-created
+            :id "evt_1"
+            :session-thread-id "thread_1"
+            :agent-name "helper"}
+           (dissoc (session-event->map event) :processed-at)))))
+
+(deftest workflow-run-stream-events-convert
+  (doseq [[type event expected] (workflow-run-events)
+          [session-event thread-event]
+          [[(case type
+              :workflow-run-created (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunCreated event)
+              :workflow-run-error (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunError event)
+              :workflow-run-phase-started (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunPhaseStarted event)
+              :workflow-run-phase-ended (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunPhaseEnded event)
+              :workflow-run-status-running (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunStatusRunning event)
+              :workflow-run-status-idle (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunStatusIdle event)
+              :workflow-run-status-ended (BetaManagedAgentsStreamSessionEvents/ofWorkflowRunStatusEnded event))
+            (case type
+              :workflow-run-created (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunCreated event)
+              :workflow-run-error (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunError event)
+              :workflow-run-phase-started (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunPhaseStarted event)
+              :workflow-run-phase-ended (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunPhaseEnded event)
+              :workflow-run-status-running (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunStatusRunning event)
+              :workflow-run-status-idle (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunStatusIdle event)
+              :workflow-run-status-ended (BetaManagedAgentsStreamSessionThreadEvents/ofWorkflowRunStatusEnded event))]]]
+    ;; Stream events keep the wire's snake_case keys.
+    (let [expected (clojure.walk/postwalk #(if (keyword? %)
+                                     (keyword (clojure.string/replace (name %) "-" "_"))
+                                     %)
+                                  expected)]
+      (doseq [mapped [(stream-event->map session-event) (stream-event->map thread-event)]]
+        (is (= type (:type mapped)))
+        (is (= expected (select-keys mapped (keys expected))))))))
 
 (deftest send-session-events-response-common-fields
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
@@ -1895,6 +2215,7 @@
               (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
               (.updatedAt ts)
               (.usage (java.util.Optional/empty))
+              (.workflowRunId (java.util.Optional/empty))
               (.build))
         m (session-thread->map r)]
     (is (= "thread_1" (:id m)))
@@ -1920,9 +2241,48 @@
               (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
               (.updatedAt ts)
               (.usage (java.util.Optional/empty))
+              (.workflowRunId (java.util.Optional/empty))
               (.build))
         m (session-thread->map r)]
     (is (= {:type :advisor :model "claude-opus-4-8"} (:agent m)))))
+
+(deftest thread-inline-agent-and-workflow-run-id-convert
+  (let [ts (java.time.OffsetDateTime/parse "2026-10-09T00:00:00Z")
+        inline-agent (-> (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent/builder)
+                         (.description "delegated helper")
+                         (.mcpServers [])
+                         (.model (managed-agent-model))
+                         (.name "researcher")
+                         (.skills [])
+                         (.system "research carefully")
+                         (.tools [])
+                         (.type (JsonValue/from "inline"))
+                         (.build))
+        thread (-> (BetaManagedAgentsSessionThread/builder)
+                   (.id "thread_1")
+                   (.agent inline-agent)
+                   (.archivedAt (java.util.Optional/empty))
+                   (.createdAt ts)
+                   (.parentThreadId (java.util.Optional/empty))
+                   (.sessionId "sess_1")
+                   (.status (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadStatus/of "idle"))
+                   (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
+                   (.updatedAt ts)
+                   (.usage (java.util.Optional/empty))
+                   (.stats (java.util.Optional/empty))
+                   (.workflowRunId "workflow_1")
+                   (.build))
+        mapped (session-thread->map thread)]
+    (is (= "workflow_1" (:workflow-run-id mapped)))
+    (is (= {:type :inline
+            :name "researcher"
+            :model "claude-opus-5-5"
+            :system "research carefully"
+            :description "delegated helper"
+            :mcp-servers []
+            :skills []
+            :tools []}
+           (:agent mapped)))))
 
 (deftest memory-response-mapping
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
