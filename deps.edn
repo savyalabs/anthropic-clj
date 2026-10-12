@@ -2,7 +2,7 @@
 
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
         com.anthropic/anthropic-java {:mvn/version "2.71.0"}
-        metosin/jsonista {:mvn/version "1.0.1"}}
+        metosin/jsonista {:mvn/version "1.0.2"}}
 
  :aliases
  {:test
@@ -20,7 +20,7 @@
   {:extra-deps {com.anthropic/anthropic-java-vertex {:mvn/version "2.71.0"}}}
 
   :malli
-  {:extra-deps {metosin/malli {:mvn/version "0.20.2"}}}
+  {:extra-deps {metosin/malli {:mvn/version "0.20.3"}}}
 
   :1.10 {:override-deps {org.clojure/clojure {:mvn/version "1.10.3"}}}
   :1.11 {:override-deps {org.clojure/clojure {:mvn/version "1.11.4"}}}
