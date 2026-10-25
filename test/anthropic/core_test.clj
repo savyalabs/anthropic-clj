@@ -55,6 +55,7 @@
            ))
 
 (def ->params #'a/->params)
+(def core-json->clj #'a/json->clj)
 (def ->tool-choice #'a/->tool-choice)
 (def ->count-params #'a/->count-params)
 (def usage->map #'a/usage->map)
@@ -83,6 +84,17 @@
   #(when-let [v (ns-resolve 'anthropic.core 'deleted-batch->map)]
      ((deref v) %)))
 (def run-tools* #'a/run-tools*)
+
+(deftest message-param-union-round-trips
+  (let [^MessageCreateParams params
+        (->params {:messages [{:role :user :content "hello"}
+                              {:role :assistant
+                               :content [{:type :text :text "hi"}]}
+                              {:role :system :content "be concise"}]})]
+    (is (= [{:role "user" :content "hello"}
+            {:role "assistant" :content [{:type "text" :text "hi"}]}
+            {:role "system" :content "be concise"}]
+           (mapv #(core-json->clj (JsonValue/from %)) (.messages params))))))
 
 (defn- resolved-fn [sym]
   (some-> (ns-resolve 'anthropic.core sym) deref))
@@ -165,9 +177,9 @@
                                             :top-p 0.9
                                             :top-k 40
                                             :stop-sequences ["STOP" "END"]})]
-      (is (= 0.5 (opt (.temperature p))))
-      (is (= 0.9 (opt (.topP p))))
-      (is (= 40 (opt (.topK p))))
+      (is (= 0.5 (.convert ^JsonValue (get (._additionalProperties (._body p)) "temperature") Double)))
+      (is (= 0.9 (.convert ^JsonValue (get (._additionalProperties (._body p)) "top_p") Double)))
+      (is (= 40 (.convert ^JsonValue (get (._additionalProperties (._body p)) "top_k") Long)))
       (is (= ["STOP" "END"] (vec (opt (.stopSequences p)))))))
   (testing "metadata user-id"
     (let [^MessageCreateParams p (->params {:messages [{:role :user :content "hi"}]
@@ -469,6 +481,7 @@
   (let [^Usage$Builder b (Usage/builder)]
     (doto b
       (.inputTokens (long in)) (.outputTokens (long out))
+      (.speed com.anthropic.models.messages.Usage$Speed/STANDARD)
       (.cacheCreation empty-opt) (.serverToolUse empty-opt) (.serviceTier empty-opt)
       (.inferenceGeo empty-opt) (.outputTokensDetails empty-opt)
       (.cacheCreationInputTokens ^java.util.Optional (if cc (java.util.Optional/of (long cc)) empty-opt))
@@ -1150,6 +1163,7 @@
   (let [u (-> (Usage/builder)
               (.inputTokens 10)
               (.outputTokens 20)
+              (.speed com.anthropic.models.messages.Usage$Speed/STANDARD)
               (.cacheCreation (-> (CacheCreation/builder)
                                   (.ephemeral1hInputTokens 3)
                                   (.ephemeral5mInputTokens 4)
@@ -1480,7 +1494,8 @@
       (is (= "before" (opt (.beforeId p))))
       (is (= "after" (opt (.afterId p))))
       (is (= ["active" "deprecated"] (mapv #(.asString %) (opt (.lifecycle p)))))
-      (is (= ["beta-one" "beta-two"] (mapv str (opt (.betas p)))))
+      (is (= ["beta-one" "beta-two"]
+             (vec (.values (._additionalHeaders p) "anthropic-beta"))))
       (is (some #{'[client opts]} (:arglists (meta #'a/list-models)))))))
 
 (defn- delta-event [^RawContentBlockDelta d]

@@ -33,8 +33,10 @@
                                                BetaJsonOutputFormat
                                                BetaJsonOutputFormat$Schema
                                                BetaMessage BetaMessageTokensCount
-                                               BetaMessageParam BetaMessageParam$Builder
-                                               BetaMessageParam$Role BetaMessageParam$ClearAt
+                                               BetaMessageParam
+                                               BetaSystemMessageParam BetaSystemMessageParam$Builder
+                                               BetaSystemMessageParam$ClearAt
+                                               BetaSystemMessageParam$Content$SystemMessageContentBlock
                                                BetaMetadata BetaOutputConfig
                                                BetaOutputConfig$Effort
                                                StructuredOutputConfig
@@ -1152,18 +1154,45 @@
 (defn- ->message-param
   ^BetaMessageParam
   [{:keys [role content clear-at output-config]}]
-  (let [^BetaMessageParam$Builder b (BetaMessageParam/builder)]
-    (.role b (BetaMessageParam$Role/of (name (keyword role))))
-    (if (string? content)
-      (.content b ^String content)
-      (.contentOfBetaContentBlockParams b ^java.util.List (mapv ->content-block content)))
-    (when clear-at
-      (let [^BetaMessageParam$ClearAt value
-            (->enum-value clear-at #{:never :next-user-message}
-                          (fn [s#] (BetaMessageParam$ClearAt/of s#)) :clear-at)]
-        (.clearAt b value)))
-    (when output-config (.outputConfig b (->system-message-output-config output-config)))
-    (.build b)))
+  (let [role (keyword role)
+        blocks #(mapv ->content-block content)]
+    (case role
+      :user (if (or clear-at output-config)
+              (-> (JsonValue/access$getJSON_MAPPER$cp)
+                  (.readValue (json/write-value-as-string
+                               (->wire-data {:role role :content content
+                                             :clear-at clear-at :output-config output-config}))
+                              BetaMessageParam))
+              (if (string? content)
+                (BetaMessageParam/ofUser ^String content)
+                (BetaMessageParam/ofUserOfContentBlockParams ^java.util.List (blocks))))
+      :assistant (if (or clear-at output-config)
+                   (-> (JsonValue/access$getJSON_MAPPER$cp)
+                       (.readValue (json/write-value-as-string
+                                    (->wire-data {:role role :content content
+                                                  :clear-at clear-at :output-config output-config}))
+                                   BetaMessageParam))
+                   (if (string? content)
+                     (BetaMessageParam/ofAssistant ^String content)
+                     (BetaMessageParam/ofAssistantOfContentBlockParams ^java.util.List (blocks))))
+      :system (let [^BetaSystemMessageParam$Builder b (BetaSystemMessageParam/builder)]
+                (if (string? content)
+                  (.content b ^String content)
+                  (.contentOfBlocks
+                   b ^java.util.List
+                   (mapv (fn [block]
+                           (BetaSystemMessageParam$Content$SystemMessageContentBlock/ofText
+                            ^BetaTextBlockParam (->system-block block)))
+                         content)))
+                (when clear-at
+                  (.clearAt b ^BetaSystemMessageParam$ClearAt
+                            (->enum-value clear-at #{:never :next-user-message}
+                                          (fn [^String s#] (BetaSystemMessageParam$ClearAt/of s#)) :clear-at)))
+                (when output-config
+                  (.outputConfig b (->system-message-output-config output-config)))
+                (BetaMessageParam/ofSystem (.build b)))
+      (throw (ex-info "Unsupported beta message role"
+                      {:anthropic/error :unsupported-message-role :role role})))))
 
 (defn- ->mcp-server ^BetaRequestMcpServerUrlDefinition
   [{:keys [name url authorization-token tool-configuration]}]
@@ -1180,31 +1209,11 @@
         (.toolConfiguration b (.build tb))))
     (.build b)))
 
-(defn- add-create-message [^MessageCreateParams$Builder b {:keys [role content] :as message}]
-  (let [role (keyword role)]
-    (if (or (contains? message :clear-at) (contains? message :output-config))
-      (.addMessage b (->message-param message))
-      (if (string? content)
-      (case role
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case role
-          :user (.addUserMessageOfBetaContentBlockParams b ^java.util.List blocks)
-          :assistant (.addAssistantMessageOfBetaContentBlockParams b ^java.util.List blocks)))))))
+(defn- add-create-message [^MessageCreateParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
-(defn- add-count-message [^MessageCountTokensParams$Builder b {:keys [role content] :as message}]
-  (let [role (keyword role)]
-    (if (or (contains? message :clear-at) (contains? message :output-config))
-      (.addMessage b (->message-param message))
-      (if (string? content)
-      (case role
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case role
-          :user (.addUserMessageOfBetaContentBlockParams b ^java.util.List blocks)
-          :assistant (.addAssistantMessageOfBetaContentBlockParams b ^java.util.List blocks)))))))
+(defn- add-count-message [^MessageCountTokensParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
 (defn- ->params ^MessageCreateParams
   [{:keys [model max-tokens system messages tools temperature top-p top-k stop-sequences
@@ -1222,9 +1231,6 @@
       (if (string? system)
         (.system b ^String system)
         (.systemOfBetaTextBlockParams b ^java.util.List (mapv ->system-block system))))
-    (when temperature (.temperature b (double temperature)))
-    (when top-p (.topP b (double top-p)))
-    (when top-k (.topK b (long top-k)))
     (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when thinking (.thinking b (->thinking thinking)))
@@ -1262,7 +1268,15 @@
     (doseq [[k v] extra-headers] (.putAdditionalHeader b ^String (name k) ^String v))
     (doseq [[k v] extra-query] (.putAdditionalQueryParam b ^String (name k) ^String v))
     (doseq [[k v] extra-body] (.putAdditionalBodyProperty b ^String (name k) (->json v)))
-    (.build b)))
+    (let [^MessageCreateParams params (.build b)]
+      (if (or temperature top-p top-k)
+        (let [^com.anthropic.models.beta.messages.MessageCreateParams$Body$Builder body
+              (.toBuilder (._body params))]
+          (when temperature (.putAdditionalProperty body "temperature" (JsonValue/from (double temperature))))
+          (when top-p (.putAdditionalProperty body "top_p" (JsonValue/from (double top-p))))
+          (when top-k (.putAdditionalProperty body "top_k" (JsonValue/from (long top-k))))
+          (-> (.toBuilder params) (.body (.build body)) (.build)))
+        params))))
 
 (defn- ->count-params ^MessageCountTokensParams
   [{:keys [model system messages tools thinking tool-choice betas cache-control compaction context-management
@@ -1591,11 +1605,10 @@
              [(.metadata p) #(.metadata b ^BetaMetadata %)]
              [(.outputConfig p) #(.outputConfig b ^BetaOutputConfig %)]
              [(.stopSequences p) #(.stopSequences b ^java.util.List %)]
-             [(.temperature p) #(.temperature b (double %))]
              [(.thinking p) #(.thinking b ^BetaThinkingConfigParam %)]
              [(.toolChoice p) #(.toolChoice b ^BetaToolChoice %)]
              [(.tools p) #(.tools b ^java.util.List %)]
-             [(.topK p) #(.topK b (long %))] [(.topP p) #(.topP b (double %))]]]
+             ]]
       (when (.isPresent ^java.util.Optional value) (setter (.get ^java.util.Optional value))))
     (when-let [container (:container req)]
       (if (string? container)
@@ -1607,6 +1620,12 @@
     (when-let [tier (:service-tier req)]
       (.serviceTier b (BatchCreateParams$Request$Params$ServiceTier/of
                        (-> tier name (str/replace "-" "_")))))
+    (when-let [temperature (:temperature req)]
+      (.putAdditionalProperty b "temperature" (JsonValue/from (double temperature))))
+    (when-let [top-p (:top-p req)]
+      (.putAdditionalProperty b "top_p" (JsonValue/from (double top-p))))
+    (when-let [top-k (:top-k req)]
+      (.putAdditionalProperty b "top_k" (JsonValue/from (long top-k))))
     (.build b)))
 
 (defn- ->batch-request ^BatchCreateParams$Request [{:keys [custom-id params]}]

@@ -34,7 +34,7 @@
       (.id "role_developer")
       (.createdAt timestamp)
       (.displayName "Developer role")
-      (.name "Developer")
+      (.putAdditionalProperty "name" (JsonValue/from "Developer"))
       (.type (JsonValue/from "rbac_role"))
       (.updatedAt timestamp)
       (.build)))

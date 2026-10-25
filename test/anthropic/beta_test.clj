@@ -21,18 +21,15 @@
                                                SessionUpdateParams)
            (com.anthropic.models.beta.sessions.events BetaManagedAgentsEventParams
                                                        BetaManagedAgentsAgentMessageEvent
-                                                       BetaManagedAgentsAgentMessageEvent$Type
                                                        BetaManagedAgentsRepositoryCloneError
                                                        BetaManagedAgentsRepositoryNotFoundError
                                                        BetaManagedAgentsRetryStatusTerminal
                                                        BetaManagedAgentsSessionErrorEvent
-                                                       BetaManagedAgentsSessionErrorEvent$Type
                                                        BetaManagedAgentsSendSessionEvents
                                                        BetaManagedAgentsSessionEvent
                                                        BetaManagedAgentsSessionRefusal
                                                        BetaManagedAgentsSessionRefusalStopDetails
                                                        BetaManagedAgentsSessionStatusIdleEvent
-                                                       BetaManagedAgentsSessionStatusIdleEvent$Type
                                                        BetaManagedAgentsStreamSessionEvents
                                                        BetaManagedAgentsUserMessageEvent
                                                        EventSendParams)
@@ -57,9 +54,7 @@
                                                              MemoryUpdateParams)
            (com.anthropic.models.beta.memorystores.memoryversions BetaManagedAgentsActor
                                                                    BetaManagedAgentsApiActor
-                                                                   BetaManagedAgentsApiActor$Type
                                                                    BetaManagedAgentsMemoryVersion
-                                                                   BetaManagedAgentsMemoryVersion$Type
                                                                    BetaManagedAgentsMemoryVersionOperation
                                                                    BetaManagedAgentsServiceAccountActor
                                                                    MemoryVersionListParams
@@ -268,7 +263,7 @@
                    (.medium support) (.xhigh (Optional/of support))
                    (.supported true) (.build))
         thinking-types (-> (BetaThinkingTypes/builder)
-                           (.adaptive support) (.disabled support) (.enabled support) (.build))
+                           (.adaptive support) (.betweenTools support) (.disabled support) (.enabled support) (.build))
         thinking (-> (BetaThinkingCapability/builder)
                      (.supported true) (.types thinking-types) (.build))
         compaction (-> (BetaCompactionCapability/builder)
@@ -484,7 +479,7 @@
    (-> (BetaManagedAgentsAgentReference/builder)
       (.id id)
       (.version version)
-      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgentReference$Type/of "agent"))
+      (.type (JsonValue/from "agent"))
       (.build))))
 
 (defn- managed-agent-model []
@@ -492,17 +487,24 @@
       (.id (com.anthropic.models.beta.agents.BetaManagedAgentsModel/of "claude-opus-5-5"))
       (.build)))
 
+(defn- service-account-execution-identity []
+  (com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentity/ofServiceAccount
+   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsServiceAccountExecutionIdentity/builder)
+       (.type (JsonValue/from "service_account"))
+       (.build))))
+
 (defn- session-thread-agent [id version]
   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent/builder)
       (.id id)
       (.description (java.util.Optional/empty))
+      (.executionIdentity (service-account-execution-identity))
       (.system (java.util.Optional/empty))
       (.mcpServers [])
       (.model (managed-agent-model))
       (.name (str id " name"))
       (.skills [])
       (.tools [])
-      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent$Type/of "agent"))
+      (.type (JsonValue/from "agent"))
       (.version version)
       (.build)))
 
@@ -538,6 +540,7 @@
   (let [ts (java.time.OffsetDateTime/parse "2026-10-09T00:00:00Z")]
     (-> (BetaManagedAgentsAgent/builder)
         (.id "agent_1")
+        (.executionIdentity (service-account-execution-identity))
         (.description "helps")
         (.system "be helpful")
         (.archivedAt (java.util.Optional/empty))
@@ -550,7 +553,7 @@
         (.name "helper")
         (.skills [])
         (.tools [])
-        (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Type/of "agent"))
+        (.type (JsonValue/from "agent"))
         (.updatedAt ts)
         (.version 1)
         (.build))))
@@ -558,6 +561,7 @@
 (defn- session-agent-response [multiagent]
   (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent/builder)
       (.id "agent_1")
+      (.executionIdentity (service-account-execution-identity))
       (.description "helps")
       (.system "be helpful")
       (.mcpServers [])
@@ -566,7 +570,7 @@
       (.name "helper")
       (.skills [])
       (.tools [])
-      (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Type/of "agent"))
+      (.type (JsonValue/from "agent"))
       (.version 1)
       (.build)))
 
@@ -627,7 +631,7 @@
       (.id id)
       (.content [])
       (.processedAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
-      (.type (BetaManagedAgentsAgentMessageEvent$Type/of "agent_message"))
+      (.type (JsonValue/from "agent_message"))
       (.build)))
 
 (deftest event-stream-params
@@ -694,7 +698,7 @@
                         (.type (JsonValue/from "refusal"))
                         (.build))))
                   (.stopDetails details)
-                  (.type (BetaManagedAgentsSessionStatusIdleEvent$Type/of "session_status_idle"))
+                  (.type (JsonValue/from "session_status_idle"))
                   (.build))]
     (is (= :refusal
            (:stop-reason (session-event->map
@@ -715,7 +719,7 @@
                         (.type (JsonValue/from "refusal"))
                         (.build))))
                   (.stopDetails details)
-                  (.type (BetaManagedAgentsSessionStatusIdleEvent$Type/of "session_status_idle"))
+                  (.type (JsonValue/from "session_status_idle"))
                   (.build))]
     (is (= {:type :refusal :category :cyber :explanation "Cannot help with that"}
            (:stop-details (session-event->map
@@ -727,7 +731,7 @@
                              (.repositoryUrl "https://example.test/repo.git")
                              (.retryStatus
                               (-> (BetaManagedAgentsRetryStatusTerminal/builder)
-                                  (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsRetryStatusTerminal$Type/of "terminal"))
+                                  (.type (JsonValue/from "terminal"))
                                   (.build)))
                              (.type (JsonValue/from "repository_clone"))
                              (.build))
@@ -735,7 +739,7 @@
                   (.id "evt_error")
                   (.error repository-error)
                   (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
-                  (.type (BetaManagedAgentsSessionErrorEvent$Type/of "session_error"))
+                  (.type (JsonValue/from "session_error"))
                   (.build))]
     (is (= {:type :repository-clone-error
             :message "clone failed"
@@ -750,14 +754,14 @@
                              (.repositoryUrl "https://example.test/missing.git")
                              (.retryStatus
                               (-> (BetaManagedAgentsRetryStatusTerminal/builder)
-                                  (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsRetryStatusTerminal$Type/of "terminal"))
+                                  (.type (JsonValue/from "terminal"))
                                   (.build)))
                              (.type (JsonValue/from "repository_not_found"))
                              (.build))
         event (-> (BetaManagedAgentsSessionErrorEvent/builder)
                   (.id "evt_missing") (.error repository-error)
                   (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
-                  (.type (BetaManagedAgentsSessionErrorEvent$Type/of "session_error"))
+                  (.type (JsonValue/from "session_error"))
                   (.build))]
     (is (= :repository-not-found-error
            (get-in (session-event->map
@@ -820,9 +824,11 @@
                               (.id "claude-opus-4-8") (.build)))
                   (.outputBehavior
                    (com.anthropic.models.beta.dreams.BetaOutputBehavior/ofCreateNew
-                    (com.anthropic.models.beta.dreams.BetaOutputBehaviorCreateNew$Type/of "create_new")))
+                   (-> (com.anthropic.models.beta.dreams.BetaOutputBehaviorCreateNew/builder)
+                       (.type (JsonValue/from "create_new"))
+                       (.build))))
                   (.status (com.anthropic.models.beta.dreams.BetaDreamStatus/of "running"))
-                  (.type (com.anthropic.models.beta.dreams.BetaDream$Type/of "dream"))
+                  (.type (JsonValue/from "dream"))
                   (.usage (-> (com.anthropic.models.beta.dreams.BetaDreamUsage/builder)
                               (.cacheCreationInputTokens 0) (.cacheReadInputTokens 0)
                               (.inputTokens 0) (.outputTokens 0) (.build)))
@@ -1161,7 +1167,7 @@
         (opt (.multiagent create))
         coordinator (.asCoordinator cm)]
     (is (.isCoordinator cm))
-    (is (= "coordinator" (.asString (.type coordinator))))
+    (is (= "coordinator" (.convert (._type coordinator) String)))
     (is (= 5 (count (.agents coordinator))))
     (let [entries (.agents coordinator)]
       (is (= "agent_1" (.asString (first entries))))
@@ -1263,7 +1269,7 @@
         bp (opt (.budget p))]
     (is (= "1.25" (.amount (.maxListCost bp))))
     (is (= "USD" (.asString (.currency (.maxListCost bp)))))
-    (is (= "limit" (.asString (.type bp)))))
+    (is (= "limit" (.convert (._type bp) String))))
   (let [p (->agent-create-params {:name "a" :model "claude-opus-4-8"
                                   :effort :high :inference-geo "us"})]
     (is (= "us" (opt (.inferenceGeo (.asBetaManagedAgentsModelConfigParams (.model p)))))))
@@ -1290,17 +1296,18 @@
                   (.amount "1.25") (.currency com.anthropic.models.beta.BetaCurrency/USD) (.build))
         budget (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit/builder)
                    (.maxListCost money)
-                   (.type com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit$Type/LIMIT)
+                   (.type (JsonValue/from "limit"))
                    (.build))
         ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
         agent (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent/builder)
                   (.id "agent_1") (.name "a") (.version 1)
+                  (.executionIdentity (service-account-execution-identity))
                   (.description "d") (.mcpServers []) (.skills []) (.tools [])
                   (.multiagent (java.util.Optional/empty))
                   (.model (-> (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig/builder)
                               (.id (com.anthropic.models.beta.agents.BetaManagedAgentsModel/of "m")) (.build)))
                   (.system "s")
-                  (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Type/of "agent"))
+                  (.type (JsonValue/from "agent"))
                   (.build))
         session (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSession/builder)
                     (.id "sess_1") (.agent agent) (.environmentId "env_1")
@@ -1310,7 +1317,7 @@
                     (.outcomeEvaluations []) (.resources [])
                     (.stats (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionStats/builder) (.build)))
                     (.status (com.anthropic.models.beta.sessions.BetaManagedAgentsSession$Status/of "idle"))
-                    (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSession$Type/of "session"))
+                    (.type (JsonValue/from "session"))
                     (.usage (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUsage/builder) (.build)))
                     (.vaultIds []) (.deploymentId (java.util.Optional/empty)) (.build))
         mapped (session->map session)
@@ -1325,13 +1332,13 @@
         budget (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit/builder)
                    (.maxListCost (-> (com.anthropic.models.beta.BetaMonetaryAmount/builder)
                                      (.amount "2") (.currency com.anthropic.models.beta.BetaCurrency/USD) (.build)))
-                   (.type com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit$Type/LIMIT) (.build))
+                   (.type (JsonValue/from "limit")) (.build))
         deployment (-> (BetaManagedAgentsDeployment/builder)
                        (.id "dep_1") (.agent (agent-ref)) (.environmentId "env_1")
                        (.name "d") (.initialEvents []) (.metadata (-> (com.anthropic.models.beta.deployments.BetaManagedAgentsDeployment$Metadata/builder) (.build)))
                        (.resources []) (.vaultIds []) (.createdAt ts) (.updatedAt ts)
                        (.status (com.anthropic.models.beta.deployments.BetaManagedAgentsDeploymentStatus/of "running"))
-                       (.type (com.anthropic.models.beta.deployments.BetaManagedAgentsDeployment$Type/of "deployment"))
+                       (.type (JsonValue/from "deployment"))
                        (.archivedAt (java.util.Optional/empty)) (.description (java.util.Optional/empty))
                        (.pausedReason (java.util.Optional/empty)) (.schedule (java.util.Optional/empty))
                        (.budget budget) (.build))
@@ -1345,10 +1352,10 @@
   (let [budget (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit/builder)
                    (.maxListCost (-> (com.anthropic.models.beta.BetaMonetaryAmount/builder)
                                      (.amount "3") (.currency com.anthropic.models.beta.BetaCurrency/USD) (.build)))
-                   (.type com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit$Type/LIMIT) (.build))
+                   (.type (JsonValue/from "limit")) (.build))
         event (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUpdatedEvent/builder)
                   (.id "evt_1") (.processedAt (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z"))
-                  (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUpdatedEvent$Type/of "session_updated"))
+                  (.type (JsonValue/from "session_updated"))
                   (.agent (java.util.Optional/empty))
                   (.title (java.util.Optional/empty)) (.budget budget) (.build))]
     (is (= {:type :session-updated :id "evt_1" :processed-at "2026-07-04T00:00Z"
@@ -1360,12 +1367,12 @@
                    (.id "mem_1") (.contentSha256 "sha") (.contentSizeBytes 1)
                    (.createdAt (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z"))
                    (.memoryStoreId "ms_1") (.memoryVersionId "mv_1") (.path "/a")
-                   (.type (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemory$Type/of "memory"))
+                   (.type (JsonValue/from "memory"))
                    (.updatedAt (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z"))
                    (.content (java.util.Optional/empty)) (.build))
         prefix (-> (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemoryPrefix/builder)
                    (.path "/")
-                   (.type (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemoryPrefix$Type/of "memory_prefix"))
+                   (.type (JsonValue/from "memory_prefix"))
                    (.build))]
     (is (= :memory (:type (memory-list-item->map (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemoryListItem/ofMemory memory)))))
     (is (= :memory-prefix (:type (memory-list-item->map (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemoryListItem/ofMemoryPrefix prefix)))))))
@@ -1390,7 +1397,7 @@
         event (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUsageEvent/builder)
                   (.id "evt_usage")
                   (.processedAt (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z"))
-                  (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUsageEvent$Type/of "session_usage"))
+                  (.type (JsonValue/from "session_usage"))
                   (.usage snapshot) (.build))]
     (is (= {:type :session-usage :id "evt_usage" :processed-at "2026-07-04T00:00Z"
             :usage {:active-seconds 1.0 :input-tokens 10}}
@@ -1764,18 +1771,19 @@
                                   (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAdvisor
                                    (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
                                        (.model "claude-opus-4-8")
-                                       (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
+                                       (.type (JsonValue/from "advisor"))
                                        (.build)))])
-                        (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Type/of "coordinator"))
+                        (.type (JsonValue/from "coordinator"))
                         (.build)))
         r (-> (BetaManagedAgentsAgent/builder)
               (.id "agent_1")
+              (.executionIdentity (service-account-execution-identity))
               (.archivedAt (java.util.Optional/empty))
               (.createdAt ts)
               (.description "d")
               (.mcpServers [(-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpServerUrlDefinition/builder)
                                 (.name "github")
-                                (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMcpServerUrlDefinition$Type/of "url"))
+                                (.type (JsonValue/from "url"))
                                 (.url "https://mcp.example.test")
                                 (.build))])
               (.metadata (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Metadata/builder)
@@ -1783,7 +1791,7 @@
               (.model (-> (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig/builder)
                           (.id (com.anthropic.models.beta.agents.BetaManagedAgentsModel/of "claude-opus-4-8"))
                           (.effort (-> (com.anthropic.models.beta.agents.BetaManagedAgentsEffortHigh/builder)
-                                       (.type (com.anthropic.models.beta.agents.BetaManagedAgentsEffortHigh$Type/of "high"))
+                                       (.type (JsonValue/from "high"))
                                        (.build)))
                           (.speed (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig$Speed/of "fast"))
                           (.build)))
@@ -1792,7 +1800,7 @@
               (.skills [(com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Skill/ofCustom
                          (-> (com.anthropic.models.beta.agents.BetaManagedAgentsCustomSkill/builder)
                              (.skillId "skill_1")
-                             (.type (com.anthropic.models.beta.agents.BetaManagedAgentsCustomSkill$Type/of "custom"))
+                             (.type (JsonValue/from "custom"))
                              (.version "2")
                              (.build)))])
               (.system "be helpful")
@@ -1803,7 +1811,7 @@
                                            (.enabled true)
                                            (.permissionPolicy
                                             (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/builder)
-                                                (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy$Type/of "always_ask"))
+                                                (.type (JsonValue/from "always_ask"))
                                                 (.build)))
                                            (.type (JsonValue/from "bash"))
                                            (.build)))
@@ -1813,7 +1821,7 @@
                                            (.enabled true)
                                            (.permissionPolicy
                                             (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy/builder)
-                                                (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy$Type/of "always_allow"))
+                                                (.type (JsonValue/from "always_allow"))
                                                 (.build)))
                                            (.userLocation (-> (com.anthropic.models.beta.agents.BetaManagedAgentsUserLocation/builder)
                                                               (.city "SF")
@@ -1826,10 +1834,10 @@
                                                 (.permissionPolicy
                                                  (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolsetDefaultConfig$PermissionPolicy/ofAlwaysAsk
                                                   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/builder)
-                                                      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy$Type/of "always_ask"))
+                                                      (.type (JsonValue/from "always_ask"))
                                                       (.build))))
                                                 (.build)))
-                            (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401$Type/of "agent_toolset_20260401"))
+                            (.type (JsonValue/from "agent_toolset_20260401"))
                             (.build)))
                         (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Tool/ofMcpToolset
                         (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolset/builder)
@@ -1839,13 +1847,13 @@
                                                 (.permissionPolicy
                                                  (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolsetDefaultConfig$PermissionPolicy/ofAlwaysAsk
                                                   (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/builder)
-                                                      (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy$Type/of "always_ask"))
+                                                      (.type (JsonValue/from "always_ask"))
                                                       (.build))))
                                                 (.build)))
                             (.mcpServerName "github")
-                            (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolset$Type/of "mcp_toolset"))
+                            (.type (JsonValue/from "mcp_toolset"))
                             (.build)))])
-              (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Type/of "agent"))
+              (.type (JsonValue/from "agent"))
               (.updatedAt ts)
               (.version 7)
               (.build))
@@ -1874,7 +1882,7 @@
           (opt (.multiagent rt))
           coordinator (.asCoordinator rtm)
           entries (.agents coordinator)]
-      (is (= "coordinator" (.asString (.type coordinator))))
+      (is (= "coordinator" (.convert (._type coordinator) String)))
       (is (= 2 (count entries)))
       (is (= "agent_1" (.id (.asAgent (first entries)))))
       (is (= 1 (opt (.version (.asAgent (first entries))))))
@@ -1907,9 +1915,9 @@
                       (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Agent/ofAdvisor
                        (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
                            (.model "claude-opus-5-5")
-                           (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
+                           (.type (JsonValue/from "advisor"))
                            (.build)))])
-             (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinator$Type/of "coordinator"))
+             (.type (JsonValue/from "coordinator"))
              (.build)))]
     (is (= {:type :coordinator
             :agents [{:type :agent :id "agent_123" :version 2}
@@ -1922,23 +1930,24 @@
                   (.inferenceGeo "eu")
                   (.speed (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig$Speed/of "fast"))
                   (.effort (-> (com.anthropic.models.beta.agents.BetaManagedAgentsEffortHigh/builder)
-                               (.type (com.anthropic.models.beta.agents.BetaManagedAgentsEffortHigh$Type/of "high"))
+                               (.type (JsonValue/from "high"))
                                (.build)))
                   (.build))
         agent (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent/builder)
                   (.id "agent_1")
+                  (.executionIdentity (service-account-execution-identity))
                   (.model model)
                   (.name "helper")
                   (.version 1)
                   (.description "d")
                   (.system "s")
                   (.mcpServers [])
-                  (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Type/of "agent"))
+                  (.type (JsonValue/from "agent"))
                   (.skills [])
                   (.tools [])
                   (.multiagent (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentCoordinator/builder)
                                    (.agents [])
-                                   (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentCoordinator$Type/of "coordinator"))
+                                   (.type (JsonValue/from "coordinator"))
                                    (.build)))
                   (.build))
         m (session-agent->map agent)]
@@ -1974,7 +1983,7 @@
                (-> (BetaManagedAgentsUserMessageEvent/builder)
                    (.id "evt_1")
                    (.addTextContent "hello")
-                   (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEvent$Type/of "user_message"))
+                   (.type (JsonValue/from "user_message"))
                    (.processedAt (java.util.Optional/empty))
                    (.build)))
         sent (-> (BetaManagedAgentsSendSessionEvents/builder)
@@ -1986,7 +1995,7 @@
                      (-> (BetaManagedAgentsUserMessageEvent/builder)
                          (.id "evt_2")
                          (.addTextContent "hi")
-                         (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEvent$Type/of "user_message"))
+                         (.type (JsonValue/from "user_message"))
                          (.processedAt (java.util.Optional/empty))
                          (.build)))])
             (.build))
@@ -2056,33 +2065,33 @@
   (let [ts (java.time.OffsetDateTime/parse "2026-07-04T00:00:00Z")
         user-message (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEvent/builder)
                          (.id "evt_1") (.addTextContent "hello")
-                         (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEvent$Type/of "user_message"))
+                         (.type (JsonValue/from "user_message"))
                          (.processedAt ts) (.build))
         system-message (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSystemMessageEvent/builder)
                            (.id "evt_1") (.content [])
-                           (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSystemMessageEvent$Type/of "system_message"))
+                           (.type (JsonValue/from "system_message"))
                            (.processedAt ts) (.build))
         user-define-outcome (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserDefineOutcomeEvent/builder)
                                 (.id "evt_1") (.description "done") (.maxIterations 1)
                                 (.outcomeId "outcome_1") (.textRubric "good")
-                                (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserDefineOutcomeEvent$Type/of "user_define_outcome"))
+                                (.type (JsonValue/from "user_define_outcome"))
                                 (.processedAt ts) (.build))
         user-interrupt (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEvent/builder)
                            (.id "evt_1")
-                           (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEvent$Type/of "user_interrupt"))
+                           (.type (JsonValue/from "user_interrupt"))
                            (.processedAt ts) (.build))
         user-tool-confirmation (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEvent/builder)
                                    (.id "evt_1") (.result com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEvent$Result/ALLOW)
                                    (.toolUseId "tool_1") (.denyMessage "no")
-                                   (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEvent$Type/of "user_tool_confirmation"))
+                                   (.type (JsonValue/from "user_tool_confirmation"))
                                    (.processedAt ts) (.build))
         user-custom-tool-result (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEvent/builder)
                                     (.id "evt_1") (.customToolUseId "custom_1") (.addTextContent "ok")
-                                    (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEvent$Type/of "user_custom_tool_result"))
+                                    (.type (JsonValue/from "user_custom_tool_result"))
                                     (.isError true) (.processedAt ts) (.build))
         user-tool-result (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsUserToolResultEvent/builder)
                              (.id "evt_1") (.toolUseId "tool_1") (.addTextContent "ok")
-                             (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsUserToolResultEvent$Type/of "user_tool_result"))
+                             (.type (JsonValue/from "user_tool_result"))
                              (.isError true) (.processedAt ts) (.build))
         variants [[:user-message
                    (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSendSessionEvents$Data/ofUserMessage user-message)
@@ -2135,23 +2144,23 @@
   (let [sources [(com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock$Source/ofBase64
                   (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsBase64DocumentSource/builder)
                       (.data "aGVsbG8=") (.mediaType "application/pdf")
-                      (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsBase64DocumentSource$Type/of "base64"))
+                          (.type (JsonValue/from "base64"))
                       (.build)))
                  (com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock$Source/ofText
                   (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsPlainTextDocumentSource/builder)
                       (.data "hello")
-                      (.mediaType (com.anthropic.models.beta.sessions.events.BetaManagedAgentsPlainTextDocumentSource$MediaType/of "text/plain"))
-                      (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsPlainTextDocumentSource$Type/of "text"))
+                      (.mediaType (JsonValue/from "text/plain"))
+                      (.type (JsonValue/from "text"))
                       (.build)))
                  (com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock$Source/ofUrl
                   (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUrlDocumentSource/builder)
                       (.url "https://example.test/doc.pdf")
-                      (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUrlDocumentSource$Type/of "url"))
+                      (.type (JsonValue/from "url"))
                       (.build)))
                  (com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock$Source/ofFile
                   (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsFileDocumentSource/builder)
                       (.fileId "file_1")
-                      (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsFileDocumentSource$Type/of "file"))
+                      (.type (JsonValue/from "file"))
                       (.build)))]]
     (doseq [[source expected] (map vector sources
                                   [{:type :base64 :media-type "application/pdf" :data "aGVsbG8="}
@@ -2161,21 +2170,21 @@
       (let [content (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEvent$Content/ofDocument
                      (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock/builder)
                          (.source source)
-                         (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsDocumentBlock$Type/of "document"))
+                         (.type (JsonValue/from "document"))
                          (.build)))]
         (is (= {:type :document :source expected} (user-content->map content)))
         ))))
     (let [base64 (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsBase64ImageSource/builder)
                      (.data "aGVsbG8=") (.mediaType "application/pdf")
-                     (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsBase64ImageSource$Type/of "base64"))
+                  (.type (JsonValue/from "base64"))
                      (.build))
           url (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUrlImageSource/builder)
                   (.url "https://example.test/doc.pdf")
-                  (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUrlImageSource$Type/of "url"))
+                  (.type (JsonValue/from "url"))
                   (.build))
           file (-> (com.anthropic.models.beta.sessions.events.BetaManagedAgentsFileImageSource/builder)
                    (.fileId "file_1")
-                   (.type (com.anthropic.models.beta.sessions.events.BetaManagedAgentsFileImageSource$Type/of "file"))
+                   (.type (JsonValue/from "file"))
                    (.build))]
       (is (= #{:type :media-type :data}
              (set (keys (image-source->map
@@ -2194,6 +2203,7 @@
               (.id "thread_1")
               (.agent (-> (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent/builder)
                           (.id "agent_1")
+                          (.executionIdentity (service-account-execution-identity))
                           (.description "d")
                           (.mcpServers [])
                           (.model (-> (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfig/builder)
@@ -2204,7 +2214,7 @@
                           (.system "be helpful")
                           (.tools [])
                           (.version 2)
-                          (.type (com.anthropic.models.beta.agents.BetaManagedAgentsSessionThreadAgent$Type/of "agent"))
+                          (.type (JsonValue/from "agent"))
                           (.build)))
               (.archivedAt (java.util.Optional/empty))
               (.createdAt ts)
@@ -2212,7 +2222,7 @@
               (.sessionId "sess_1")
               (.stats (java.util.Optional/empty))
               (.status (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadStatus/of "idle"))
-              (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
+              (.type (JsonValue/from "session_thread"))
               (.updatedAt ts)
               (.usage (java.util.Optional/empty))
               (.workflowRunId (java.util.Optional/empty))
@@ -2230,7 +2240,7 @@
               (.id "thread_2")
               (.agent (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor/builder)
                           (.model "claude-opus-4-8")
-                          (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAdvisor$Type/of "advisor"))
+                          (.type (JsonValue/from "advisor"))
                           (.build)))
               (.archivedAt (java.util.Optional/empty))
               (.createdAt ts)
@@ -2238,7 +2248,7 @@
               (.sessionId "sess_1")
               (.stats (java.util.Optional/empty))
               (.status (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadStatus/of "idle"))
-              (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
+              (.type (JsonValue/from "session_thread"))
               (.updatedAt ts)
               (.usage (java.util.Optional/empty))
               (.workflowRunId (java.util.Optional/empty))
@@ -2250,6 +2260,7 @@
   (let [ts (java.time.OffsetDateTime/parse "2026-10-09T00:00:00Z")
         inline-agent (-> (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent/builder)
                          (.description "delegated helper")
+                         (.executionIdentity (service-account-execution-identity))
                          (.mcpServers [])
                          (.model (managed-agent-model))
                          (.name "researcher")
@@ -2266,7 +2277,7 @@
                    (.parentThreadId (java.util.Optional/empty))
                    (.sessionId "sess_1")
                    (.status (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadStatus/of "idle"))
-                   (.type (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThread$Type/of "session_thread"))
+              (.type (JsonValue/from "session_thread"))
                    (.updatedAt ts)
                    (.usage (java.util.Optional/empty))
                    (.stats (java.util.Optional/empty))
@@ -2294,13 +2305,13 @@
               (.memoryStoreId "ms_1")
               (.memoryVersionId "mv_1")
               (.path "/notes/a.md")
-              (.type (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemory$Type/of "memory"))
+              (.type (JsonValue/from "memory"))
               (.updatedAt ts)
               (.content "hello")
               (.build))
         d (-> (BetaManagedAgentsDeletedMemory/builder)
               (.id "mem_1")
-              (.type (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsDeletedMemory$Type/of "memory_deleted"))
+              (.type (JsonValue/from "memory_deleted"))
               (.build))
         m (memory->map r)]
     (is (= "mem_1" (:id m)))
@@ -2331,7 +2342,7 @@
         r (-> (com.anthropic.models.beta.memorystores.memoryversions.BetaManagedAgentsMemoryVersion/builder)
               (.id "mv_1") (.memoryStoreId "ms_1") (.memoryId "mem_1")
               (.operation (com.anthropic.models.beta.memorystores.memoryversions.BetaManagedAgentsMemoryVersionOperation/of "redact"))
-              (.createdAt ts) (.type (com.anthropic.models.beta.memorystores.memoryversions.BetaManagedAgentsMemoryVersion$Type/of "memory_version"))
+              (.createdAt ts) (.type (JsonValue/from "memory_version"))
               (.redactedAt ts) (.build))]
     (is (= {:id "mv_1" :memory-store-id "ms_1" :memory-id "mem_1"
             :operation :redact :created-at "2026-07-22T00:00Z" :redacted-at "2026-07-22T00:00Z"}
@@ -2343,13 +2354,13 @@
                   (.id "mv_1") (.memoryStoreId "ms_1") (.memoryId "mem_1")
                   (.operation (BetaManagedAgentsMemoryVersionOperation/of "create"))
                   (.createdAt ts)
-                  (.type (BetaManagedAgentsMemoryVersion$Type/of "memory_version")))
+                  (.type (JsonValue/from "memory_version")))
         service-account (-> (BetaManagedAgentsServiceAccountActor/builder)
                             (.serviceAccountId "sa_1")
                             (.build))
         api (-> (BetaManagedAgentsApiActor/builder)
                 (.apiKeyId "key_1")
-                (.type (BetaManagedAgentsApiActor$Type/of "api"))
+                (.type (JsonValue/from "api"))
                 (.build))]
     (is (= {:type :service-account :service-account-id "sa_1"}
            (:created-by (memory-version->map
@@ -2396,7 +2407,7 @@
               (.id "res_1") (.fileId "file_1") (.mountPath "/tmp/input")
               (.createdAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
               (.updatedAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
-              (.type (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsFileResource$Type/of "file"))
+              (.type (JsonValue/from "file"))
               (.build))]
     (is (= {:type :file :id "res_1" :file-id "file_1" :mount-path "/tmp/input"
             :created-at "2026-07-22T00:00Z" :updated-at "2026-07-22T00:00Z"}
@@ -2408,13 +2419,13 @@
                    (.createdAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
                    (.updatedAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
                    (.branchCheckout "main")
-                   (.type (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsGitHubRepositoryResource$Type/of "github_repository"))
+                   (.type (JsonValue/from "github_repository"))
                    (.build))
         memory (-> (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource/builder)
                    (.memoryStoreId "store_1") (.access (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource$Access/of "read_only"))
                    (.description "A store") (.instructions "Use it") (.name "Notes")
                    (.mountPath "/memory")
-                   (.type (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource$Type/of "memory_store"))
+                   (.type (JsonValue/from "memory_store"))
                    (.build))
         github-map (session-resource->map github)
         memory-map (session-resource->map memory)
@@ -2434,13 +2445,13 @@
                    (.branchCheckout "main")
                    (.createdAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
                    (.updatedAt (java.time.OffsetDateTime/parse "2026-07-22T00:00:00Z"))
-                   (.type (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsGitHubRepositoryResource$Type/of "github_repository"))
+                   (.type (JsonValue/from "github_repository"))
                    (.build))
         memory (-> (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource/builder)
                    (.memoryStoreId "store_1") (.access (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource$Access/of "read_only"))
                    (.description "A store") (.instructions "Use it") (.name "Notes")
                    (.mountPath "/memory")
-                   (.type (com.anthropic.models.beta.sessions.resources.BetaManagedAgentsMemoryStoreResource$Type/of "memory_store"))
+                   (.type (JsonValue/from "memory_store"))
                    (.build))
         direct-github (session-resource->map github)
         direct-memory (session-resource->map memory)
@@ -2461,7 +2472,7 @@
 
 (deftest agent-tool-response-mapping-preserves-properties-and-permission-policies
   (let [always-ask (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/builder)
-                       (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy$Type/of "always_ask"))
+                       (.type (JsonValue/from "always_ask"))
                        (.build))
         properties (-> (com.anthropic.models.beta.agents.BetaManagedAgentsCustomToolInputSchema$Properties/builder)
                        (.putAdditionalProperty "query" (JsonValue/from {"type" "string"}))
@@ -2470,7 +2481,7 @@
                    (.name "search") (.description "Search")
                    (.inputSchema (-> (com.anthropic.models.beta.agents.BetaManagedAgentsCustomToolInputSchema/builder)
                                      (.type (JsonValue/from "object")) (.properties properties) (.build)))
-                   (.type (com.anthropic.models.beta.agents.BetaManagedAgentsCustomTool$Type/of "custom"))
+                   (.type (JsonValue/from "custom"))
                    (.build))
         mcp-config (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolConfig/builder)
                        (.name "search") (.enabled true)
@@ -2482,7 +2493,7 @@
                         (.build))
         mcp (-> (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolset/builder)
                 (.configs [mcp-config]) (.defaultConfig mcp-default) (.mcpServerName "server")
-                (.type (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolset$Type/of "mcp_toolset"))
+                (.type (JsonValue/from "mcp_toolset"))
                 (.build))
         agent-config (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfig/ofBash
                       (-> (com.anthropic.models.beta.agents.BetaManagedAgentsBashToolConfig/builder)
@@ -2496,7 +2507,7 @@
                           (.build))
         agent-toolset (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401/builder)
                           (.configs [agent-config]) (.defaultConfig agent-default)
-                          (.type (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401$Type/of "agent_toolset_20260401"))
+                          (.type (JsonValue/from "agent_toolset_20260401"))
                           (.build))
         mapped-custom (agent-tool->map (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Tool/ofCustom custom))
         mapped-mcp (agent-tool->map (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Tool/ofMcpToolset mcp))
@@ -2553,7 +2564,7 @@
                                                       (.putAdditionalProperty "query" (JsonValue/from {"type" "string"}))
                                                       (.build)))
                                      (.build)))
-                   (.type (com.anthropic.models.beta.agents.BetaManagedAgentsCustomTool$Type/of "custom"))
+                   (.type (JsonValue/from "custom"))
                    (.build))
         agent-tool (com.anthropic.models.beta.agents.BetaManagedAgentsAgent$Tool/ofCustom custom)
         session-tool (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Tool/ofCustom custom)
@@ -2561,13 +2572,14 @@
                   (.id (com.anthropic.models.beta.agents.BetaManagedAgentsModel/of "m")) (.build))
         session-agent (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent/builder)
                           (.id "agent_1") (.model model) (.name "helper") (.version 1)
+                          (.executionIdentity (service-account-execution-identity))
                           (.description "d") (.system "s")
                           (.multiagent (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentCoordinator/builder)
                                            (.agents [])
-                                           (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionMultiagentCoordinator$Type/of "coordinator"))
+                                           (.type (JsonValue/from "coordinator"))
                                            (.build)))
                           (.mcpServers []) (.skills []) (.tools [session-tool])
-                          (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Type/of "agent"))
+                          (.type (JsonValue/from "agent"))
                           (.build))]
     (is (= (agent-tool->map agent-tool)
            (first (:tools (session-agent->map session-agent)))))))
@@ -2580,12 +2592,12 @@
 (deftest deployment-resource-nested-fields-map
   (let [github (-> (com.anthropic.models.beta.deployments.BetaManagedAgentsGitHubRepositoryResourceConfig/builder)
                    (.url "https://example.test/repo") (.branchCheckout "release")
-                   (.type (com.anthropic.models.beta.deployments.BetaManagedAgentsGitHubRepositoryResourceConfig$Type/of "github_repository"))
+                   (.type (JsonValue/from "github_repository"))
                    (.build))
         memory (-> (com.anthropic.models.beta.deployments.BetaManagedAgentsMemoryStoreResourceConfig/builder)
                    (.memoryStoreId "store_1") (.access (com.anthropic.models.beta.deployments.BetaManagedAgentsMemoryStoreResourceConfig$Access/of "read_only"))
                    (.instructions "Use it")
-                   (.type (com.anthropic.models.beta.deployments.BetaManagedAgentsMemoryStoreResourceConfig$Type/of "memory_store"))
+                   (.type (JsonValue/from "memory_store"))
                    (.build))]
     (is (= {:type :github-repository :checkout {:type :branch :name "release"}}
            (select-keys (deployment-resource->map
@@ -2607,7 +2619,7 @@
               (.credentialId "cred_1") (.vaultId "vault_1") (.hasRefreshToken true)
               (.mcpProbe (java.util.Optional/empty)) (.refresh (java.util.Optional/empty))
               (.status (com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredentialValidationStatus/of "valid"))
-              (.type (com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredentialValidation$Type/of "vault_credential_validation"))
+              (.type (JsonValue/from "vault_credential_validation"))
               (.validatedAt ts) (.build))
         f (ns-resolve 'anthropic.beta 'credential-validation->map)]
     (is (ifn? f))
@@ -2653,10 +2665,10 @@
               (.resources ^java.util.List (java.util.ArrayList.))
               (.schedule (-> (com.anthropic.models.beta.deployments.BetaManagedAgentsSchedule/builder)
                              (.expression "0 0 * * *") (.timezone "UTC")
-                             (.type (com.anthropic.models.beta.deployments.BetaManagedAgentsSchedule$Type/of "cron"))
+                             (.type (JsonValue/from "cron"))
                              (.build)))
               (.status (com.anthropic.models.beta.deployments.BetaManagedAgentsDeploymentStatus/of "running"))
-              (.type (com.anthropic.models.beta.deployments.BetaManagedAgentsDeployment$Type/of "deployment"))
+              (.type (JsonValue/from "deployment"))
               (.createdAt ts)
               (.updatedAt ts)
               (.vaultIds ^java.util.List (java.util.ArrayList. ["vault_1"]))
@@ -2685,9 +2697,9 @@
               (.sessionId (java.util.Optional/empty))
               (.triggerContext
                (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsManualTriggerContext/builder)
-                   (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsManualTriggerContext$Type/of "manual"))
+                   (.type (JsonValue/from "manual"))
                    (.build)))
-              (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsDeploymentRun$Type/of "deployment_run"))
+              (.type (JsonValue/from "deployment_run"))
               (.build))
         m (deployment-run->map r)]
     (is (= "dr_1" (:id m)))
@@ -2742,9 +2754,9 @@
       (.sessionId (java.util.Optional/empty))
       (.triggerContext
        (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsManualTriggerContext/builder)
-           (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsManualTriggerContext$Type/of "manual"))
+           (.type (JsonValue/from "manual"))
            (.build)))
-      (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsDeploymentRun$Type/of "deployment_run"))
+      (.type (JsonValue/from "deployment_run"))
       (.build)))
 
 (deftest deployment-run-error-variants-map-to-plain-data
@@ -2752,82 +2764,82 @@
           [[:environment_archived
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentArchivedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentArchivedRunError$Type/of "environment_archived"))
+                (.type (JsonValue/from "environment_archived"))
                 (.build))]
            [:agent_archived
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsAgentArchivedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsAgentArchivedRunError$Type/of "agent_archived"))
+                (.type (JsonValue/from "agent_archived"))
                 (.build))]
            [:environment_not_found
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentNotFoundRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentNotFoundRunError$Type/of "environment_not_found"))
+                (.type (JsonValue/from "environment_not_found"))
                 (.build))]
            [:vault_not_found
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultNotFoundRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultNotFoundRunError$Type/of "vault_not_found"))
+                (.type (JsonValue/from "vault_not_found"))
                 (.build))]
            [:vault_archived
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultArchivedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultArchivedRunError$Type/of "vault_archived"))
+                (.type (JsonValue/from "vault_archived"))
                 (.build))]
            [:file_not_found
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsFileNotFoundRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsFileNotFoundRunError$Type/of "file_not_found"))
+                (.type (JsonValue/from "file_not_found"))
                 (.build))]
            [:memory_store_archived
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMemoryStoreArchivedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMemoryStoreArchivedRunError$Type/of "memory_store_archived"))
+                (.type (JsonValue/from "memory_store_archived"))
                 (.build))]
            [:skill_not_found
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSkillNotFoundRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSkillNotFoundRunError$Type/of "skill_not_found"))
+                (.type (JsonValue/from "skill_not_found"))
                 (.build))]
            [:session_resource_not_found
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionResourceNotFoundRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionResourceNotFoundRunError$Type/of "session_resource_not_found"))
+                (.type (JsonValue/from "session_resource_not_found"))
                 (.build))]
            [:workspace_archived
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsWorkspaceArchivedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsWorkspaceArchivedRunError$Type/of "workspace_archived"))
+                (.type (JsonValue/from "workspace_archived"))
                 (.build))]
            [:organization_disabled
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsOrganizationDisabledRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsOrganizationDisabledRunError$Type/of "organization_disabled"))
+                (.type (JsonValue/from "organization_disabled"))
                 (.build))]
            [:session_rate_limited
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionRateLimitedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionRateLimitedRunError$Type/of "session_rate_limited"))
+                (.type (JsonValue/from "session_rate_limited"))
                 (.build))]
            [:session_creation_rejected
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionCreationRejectedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionCreationRejectedRunError$Type/of "session_creation_rejected"))
+                (.type (JsonValue/from "session_creation_rejected"))
                 (.build))]
            [:unknown
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsUnknownRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsUnknownRunError$Type/of "unknown"))
+                (.type (JsonValue/from "unknown"))
                 (.build))]
            [:self_hosted_resources_unsupported
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSelfHostedResourcesUnsupportedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSelfHostedResourcesUnsupportedRunError$Type/of "self_hosted_resources_unsupported"))
+                (.type (JsonValue/from "self_hosted_resources_unsupported"))
                 (.build))]
            [:mcp_egress_blocked
             (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMcpEgressBlockedRunError/builder)
                 (.message "message")
-                (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMcpEgressBlockedRunError$Type/of "mcp_egress_blocked"))
+                (.type (JsonValue/from "mcp_egress_blocked"))
                 (.build))]]]
     (is (= {:type type :message "message"}
            (select-keys (:error (deployment-run->map (deployment-run-with-error error)))
@@ -2835,7 +2847,7 @@
   (let [m (deployment-run->map (deployment-run-with-error
                                 (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentArchivedRunError/builder)
                                     (.message "message")
-                                    (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentArchivedRunError$Type/of "environment_archived"))
+                                    (.type (JsonValue/from "environment_archived"))
                                     (.build))))]
     (is (not (re-find #"BetaManagedAgents" (pr-str m))))
     (is (not (instance? BetaManagedAgentsDeploymentRun (:error m))))))
@@ -2853,9 +2865,9 @@
                (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsTriggerContext/ofSchedule
                 (-> (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsScheduleTriggerContext/builder)
                     (.scheduledAt scheduled-at)
-                    (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsScheduleTriggerContext$Type/of "schedule"))
+                    (.type (JsonValue/from "schedule"))
                     (.build))))
-              (.type (com.anthropic.models.beta.deploymentruns.BetaManagedAgentsDeploymentRun$Type/of "deployment_run"))
+              (.type (JsonValue/from "deployment_run"))
               (.build))
         m (deployment-run->map r)]
     (is (= {:type :schedule :scheduled-at "2026-07-04T01:00Z"}
@@ -2883,7 +2895,7 @@
               (.build))
         d (-> (BetaEnvironmentDeleteResponse/builder)
               (.id "env_1")
-              (.type (com.anthropic.models.beta.environments.BetaEnvironmentDeleteResponse$Type/of "environment_deleted"))
+              (.type (JsonValue/from "environment_deleted"))
               (.build))
         m (environment->map r)]
     (is (= "env_1" (:id m)))
@@ -2976,13 +2988,13 @@
               (.metadata (-> (com.anthropic.models.beta.vaults.BetaManagedAgentsVault$Metadata/builder)
                              (.putAdditionalProperty "team" (JsonValue/from "platform"))
                              (.build)))
-              (.type (com.anthropic.models.beta.vaults.BetaManagedAgentsVault$Type/of "vault"))
+              (.type (JsonValue/from "vault"))
               (.createdAt ts)
               (.updatedAt ts)
               (.build))
         d (-> (BetaManagedAgentsDeletedVault/builder)
               (.id "vault_1")
-              (.type (com.anthropic.models.beta.vaults.BetaManagedAgentsDeletedVault$Type/of "vault_deleted"))
+              (.type (JsonValue/from "vault_deleted"))
               (.build))
         m (vault->map r)
         ^VaultUpdateParams u (->vault-update-params "vault_1" m)]
@@ -3017,14 +3029,14 @@
               (.externalId "ada-1")
               (.externalUserDetails external-details)
               (.externalUserOnboardedAt ts)
-              (.type (com.anthropic.models.beta.userprofiles.BetaUserProfile$Type/of "user_profile"))
+              (.type (JsonValue/from "user_profile"))
               (.createdAt ts)
               (.updatedAt ts)
               (.build))
         u (-> (BetaUserProfileEnrollmentUrl/builder)
               (.url "https://example.test/enroll")
               (.expiresAt ts)
-              (.type (com.anthropic.models.beta.userprofiles.BetaUserProfileEnrollmentUrl$Type/of "user_profile_enrollment_url"))
+              (.type (JsonValue/from "user_profile_enrollment_url"))
               (.build))
         m (user-profile->map r)]
     (is (= "up_1" (:id m)))
@@ -3245,7 +3257,7 @@
         r (-> (com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredentialValidation/builder)
               (.credentialId "cred_1") (.vaultId "vault_1") (.hasRefreshToken true)
               (.status (com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredentialValidationStatus/of "valid"))
-              (.type (com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredentialValidation$Type/of "vault_credential_validation"))
+              (.type (JsonValue/from "vault_credential_validation"))
               (.mcpProbe probe) (.refresh refresh) (.validatedAt ts) (.build))
         m ((ns-resolve 'anthropic.beta 'credential-validation->map) r)
         expected {:body "{\"ok\":true}" :body-truncated false

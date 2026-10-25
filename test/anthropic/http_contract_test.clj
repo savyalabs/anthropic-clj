@@ -77,7 +77,8 @@
                        body (json/read-value (:body request) json-mapper)]
                    (is (= "POST" (:method request)))
                    (is (= "/v1/messages" (:path request)))
-                   (is (= "test-key" (get-in request [:headers "x-api-key"])))
+                   ;; anthropic-java 3.x sends API keys as a bearer token.
+                   (is (= "Bearer test-key" (get-in request [:headers "authorization"])))
                    (is (= "application/json" (get-in request [:headers "content-type"])))
                    (is (= "claude-sonnet-4-5" (:model body)))
                    (is (= 32 (:max_tokens body)))
@@ -100,7 +101,8 @@
                        request (first @requests)
                        body (json/read-value (:body request) json-mapper)]
                    (is (= "POST" (:method request)))
-                 (is (= "/v1/messages?beta=true" (:path request)))
+                 ;; anthropic-java 3.3 no longer adds ?beta=true; the beta header marks the route.
+                 (is (= "/v1/messages" (:path request)))
                    (is (= "beta hello" (get-in body [:messages 0 :content])))
                    (is (= "beta reply" (get-in response [:content 0 :text])))))))
 

@@ -64,6 +64,7 @@
                                           JsonOutputFormat JsonOutputFormat$Schema
                                           StructuredOutputConfig
                                           Message
+                                          MessageParam
                                           MessageCountTokensTool
                                           MessageCountTokensParams
                                           MessageCountTokensParams$Builder
@@ -1230,16 +1231,23 @@
         (.effort b (OutputConfig$Effort/of (name effort))))
       (.build b))))
 
-(defn- add-message [^MessageCreateParams$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- ->message-param ^MessageParam [{:keys [role content]}]
+  (let [blocks #(mapv ->content-block content)]
+    (case (keyword role)
+      :user (if (string? content)
+              (MessageParam/ofUser ^String content)
+              (MessageParam/ofUserOfContentBlockParams ^java.util.List (blocks)))
+      :assistant (if (string? content)
+                   (MessageParam/ofAssistant ^String content)
+                   (MessageParam/ofAssistantOfContentBlockParams ^java.util.List (blocks)))
+      :system (if (string? content)
+                (MessageParam/ofSystem ^String content)
+                (MessageParam/ofSystemOfBlocks ^java.util.List (mapv ->system-block content)))
+      (throw (ex-info "Unsupported message role"
+                      {:anthropic/error :unsupported-message-role :role role})))))
+
+(defn- add-message [^MessageCreateParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
 (defn- ->params
   "Translate a request map into the SDK's MessageCreateParams."
@@ -1257,9 +1265,6 @@
       (if (string? system)
         (.system b ^String system)
         (.systemOfTextBlockParams b ^java.util.List (mapv ->system-block system))))
-    (when temperature (.temperature b (double temperature)))
-    (when top-p (.topP b (double top-p)))
-    (when top-k (.topK b (long top-k)))
     (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when thinking (.thinking b (->thinking thinking)))
@@ -1284,18 +1289,18 @@
     (doseq [[k v] extra-body]
       (let [^String property-name (name k)]
         (.putAdditionalBodyProperty b property-name (->json v))))
-    (.build b)))
+    (let [^MessageCreateParams params (.build b)]
+      (if (or temperature top-p top-k)
+        (let [^com.anthropic.models.messages.MessageCreateParams$Body$Builder body
+              (.toBuilder (._body params))]
+          (when temperature (.putAdditionalProperty body "temperature" (JsonValue/from (double temperature))))
+          (when top-p (.putAdditionalProperty body "top_p" (JsonValue/from (double top-p))))
+          (when top-k (.putAdditionalProperty body "top_k" (JsonValue/from (long top-k))))
+          (-> (.toBuilder params) (.body (.build body)) (.build)))
+        params))))
 
-(defn- add-count-message [^MessageCountTokensParams$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- add-count-message [^MessageCountTokensParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
 (defn- ->count-params
   "Translate a request map into the SDK's MessageCountTokensParams. Accepts the
@@ -1750,9 +1755,9 @@
     (doseq [state lifecycle]
       (.addLifecycle b ^com.anthropic.models.models.ModelListParams$Lifecycle
                      (com.anthropic.models.models.ModelListParams$Lifecycle/of (name state))))
-    (doseq [beta betas]
-      (let [^String beta-name (if (keyword? beta) (name beta) beta)]
-        (.addBeta b beta-name)))
+    (when (seq betas)
+      (.putAdditionalHeaders b "anthropic-beta"
+                             (mapv #(if (keyword? %) (name %) %) betas)))
     (.build b)))
 
 (defn list-models
@@ -1776,16 +1781,8 @@
 
 ;; ---- Message Batches ------------------------------------------------------
 
-(defn- add-batch-message [^BatchCreateParams$Request$Params$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- add-batch-message [^BatchCreateParams$Request$Params$Builder b messages]
+  (.messages b ^java.util.List (mapv ->message-param messages)))
 
 (defn- ->batch-req-params
   "Translate a per-request map into batch params through `->params` so both
@@ -1804,12 +1801,9 @@
              [(.metadata p) #(.metadata b ^Metadata %)]
              [(.outputConfig p) #(.outputConfig b ^OutputConfig %)]
              [(.stopSequences p) #(.stopSequences b ^java.util.List %)]
-             [(.temperature p) #(.temperature b (double %))]
              [(.thinking p) #(.thinking b ^ThinkingConfigParam %)]
              [(.toolChoice p) #(.toolChoice b ^ToolChoice %)]
-             [(.tools p) #(.tools b ^java.util.List %)]
-             [(.topK p) #(.topK b (long %))]
-             [(.topP p) #(.topP b (double %))]]]
+             [(.tools p) #(.tools b ^java.util.List %)]]]
       (when (.isPresent ^java.util.Optional value)
         (setter (.get ^java.util.Optional value))))
     (when (some? stream)
@@ -1821,6 +1815,12 @@
     (when-let [tier (:service-tier req)]
       (.serviceTier b (BatchCreateParams$Request$Params$ServiceTier/of
                        (-> tier name (str/replace "-" "_")))))
+    (when-let [temperature (:temperature req)]
+      (.putAdditionalProperty b "temperature" (JsonValue/from (double temperature))))
+    (when-let [top-p (:top-p req)]
+      (.putAdditionalProperty b "top_p" (JsonValue/from (double top-p))))
+    (when-let [top-k (:top-k req)]
+      (.putAdditionalProperty b "top_k" (JsonValue/from (long top-k))))
     (.build b)))
 
 (defn- ->batch-request ^BatchCreateParams$Request [{:keys [custom-id params]}]

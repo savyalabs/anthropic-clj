@@ -73,7 +73,6 @@
                                              BetaManagedAgentsMultiagentCoordinator$Agent
                                              BetaManagedAgentsMultiagentCoordinatorParams
                                              BetaManagedAgentsMultiagentSelfParams
-                                             BetaManagedAgentsMultiagentSelfParams$Type
                                              BetaManagedAgentsSessionThreadAgent
                                              BetaManagedAgentsAnthropicSkill
                                              BetaManagedAgentsAnthropicSkillParams
@@ -98,8 +97,6 @@
                                                BetaManagedAgentsMultiagent
                                                BetaManagedAgentsMultiagentParams
                                                BetaManagedAgentsMultiagentRosterEntryParams
-                                               BetaManagedAgentsAdvisorParams$Type
-                                               BetaManagedAgentsAgentParams$Type
                                                BetaManagedAgentsSystemContentBlock
                                                BetaManagedAgentsSystemMessageEvent
                                                SessionCreateParams
@@ -231,14 +228,13 @@
 
 (defn- budget->map [^com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit b]
   {:max-list-cost (monetary-amount->map (.maxListCost b))
-   :type (keyword (str/lower-case (.asString (.type b))))})
+   :type (keyword (str/lower-case (.convert (._type b) String)))})
 
 (defn- ->budget ^com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit
   [{:keys [max-list-cost type]}]
   (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit/builder)
       (.maxListCost (->monetary-amount max-list-cost))
-      (.type (com.anthropic.models.beta.sessions.BetaManagedAgentsBudgetLimit$Type/of
-              (if (keyword? type) (name type) type)))
+      (.type (JsonValue/from (if (keyword? type) (name type) type)))
       (.build)))
 
 (defn- server-tool-usage->map
@@ -329,6 +325,11 @@
 (defn- ->keyword [x]
   (-> x str str/lower-case (str/replace #"[._]" "-") keyword))
 
+(defn- json-type->keyword [x]
+  (->keyword (.convert ^JsonValue
+                       (clojure.lang.Reflector/invokeInstanceMethod x "_type" (object-array 0))
+                       String)))
+
 (defn- ->offset-date-time ^java.time.OffsetDateTime [x]
   (if (instance? java.time.OffsetDateTime x)
     x
@@ -389,9 +390,11 @@
       (.isPresent mit) (assoc :max-input-tokens (.get mit))
       (.isPresent mt) (assoc :max-tokens (.get mt))
       (.isPresent caps) (assoc :capabilities
-                               (normalize-model-data
-                                (json->clj (JsonValue/from ^com.anthropic.models.beta.models.BetaModelCapabilities
-                                                           (.get caps))))))))
+                               (update-in
+                                (normalize-model-data
+                                 (json->clj (JsonValue/from ^com.anthropic.models.beta.models.BetaModelCapabilities
+                                                            (.get caps))))
+                                [:thinking :types] dissoc :between-tools)))))
 
 (defn list-beta-models
   "List beta models as maps, newest first. Optional `opts` accepts `:limit`,
@@ -981,8 +984,7 @@
     (when precondition
       (let [pb (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsPrecondition/builder)]
         (when (:type precondition)
-          (.type pb (com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsPrecondition$Type/of
-                     (name (:type precondition)))))
+          (.type pb (JsonValue/from (name (:type precondition)))))
         (when (:content-sha256 precondition) (.contentSha256 pb ^String (:content-sha256 precondition)))
         (.precondition b (.build pb))))
     (.build b)))
@@ -1016,18 +1018,18 @@
            :content-size-bytes (.contentSizeBytes r)
            :created-at (str (.createdAt r))
            :updated-at (str (.updatedAt r))
-           :type (->keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.content r)) (assoc :content (unopt (.content r)))))
 
 (defn- memory-delete->map [^BetaManagedAgentsDeletedMemory r]
-  {:id (.id r) :deleted true :type (->keyword (.asString (.type r)))})
+  {:id (.id r) :deleted true :type (json-type->keyword r)})
 
 (defn- memory-list-item->map
   [^com.anthropic.models.beta.memorystores.memories.BetaManagedAgentsMemoryListItem r]
   (cond-> {:type (if (.isMemory r) :memory :memory-prefix)
            :path (.path r)}
     (.isMemory r) (merge (memory->map (.asMemory r)))
-    (.isMemoryPrefix r) (assoc :type (->keyword (.asString (.type (.asMemoryPrefix r)))))
+    (.isMemoryPrefix r) (assoc :type (json-type->keyword (.asMemoryPrefix r)))
     ))
 
 (defn create-memory
@@ -1171,13 +1173,13 @@
     :anthropic
     (let [b (BetaManagedAgentsAnthropicSkillParams/builder)]
       (.skillId b ^String skill-id)
-      (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsAnthropicSkillParams$Type/of "anthropic"))
+      (.type b (JsonValue/from "anthropic"))
       (when version (.version b ^String version))
       (BetaManagedAgentsSkillParams/ofAnthropic (.build b)))
     :custom
     (let [b (BetaManagedAgentsCustomSkillParams/builder)]
       (.skillId b ^String skill-id)
-      (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsCustomSkillParams$Type/of "custom"))
+      (.type b (JsonValue/from "custom"))
       (when version (.version b ^String version))
       (BetaManagedAgentsSkillParams/ofCustom (.build b)))
     (throw (ex-info (str "Unknown skill type " type)
@@ -1189,7 +1191,7 @@
   (let [b (BetaManagedAgentsUrlMcpServerParams/builder)]
     (.name b ^String name)
     (.url b ^String url)
-    (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsUrlMcpServerParams$Type/of "url"))
+    (.type b (JsonValue/from "url"))
     (.build b)))
 
 (defn- ->custom-tool-input-schema ^BetaManagedAgentsCustomToolInputSchema
@@ -1213,7 +1215,7 @@
     (.name b ^String name)
     (.description b ^String description)
     (.inputSchema b (->custom-tool-input-schema input-schema))
-    (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsCustomToolParams$Type/of "custom"))
+    (.type b (JsonValue/from "custom"))
     (.build b)))
 
 (declare ^:private ->tool-permission-policy)
@@ -1243,17 +1245,19 @@
             :always-ask (.permissionPolicy default-builder ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy policy))
             :auto (.permissionPolicy default-builder ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy policy))))
         (.defaultConfig b (.build default-builder))))
-    (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsMcpToolsetParams$Type/of "mcp_toolset"))
+    (.type b (JsonValue/from "mcp_toolset"))
     (.build b)))
 
 (defn- ->tool-permission-policy [{:keys [type]}]
   (case type
     :always-allow
-    (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy/of
-     (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy$Type/of "always_allow"))
+    (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy/builder)
+        (.type (JsonValue/from "always_allow"))
+        (.build))
     :always-ask
-    (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/of
-     (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy$Type/of "always_ask"))
+    (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy/builder)
+        (.type (JsonValue/from "always_ask"))
+        (.build))
     :auto
     (-> (com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy/builder)
         (.type (JsonValue/from "auto"))
@@ -1323,7 +1327,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsBashToolConfigParams$Type/of "bash"))
+       (.type b (JsonValue/from "bash"))
        (.build b)))
     :edit
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofEdit
@@ -1334,7 +1338,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsEditToolConfigParams$Type/of "edit"))
+       (.type b (JsonValue/from "edit"))
        (.build b)))
     :read
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofRead
@@ -1345,7 +1349,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsReadToolConfigParams$Type/of "read"))
+       (.type b (JsonValue/from "read"))
        (.build b)))
     :write
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofWrite
@@ -1356,7 +1360,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsWriteToolConfigParams$Type/of "write"))
+       (.type b (JsonValue/from "write"))
        (.build b)))
     :glob
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofGlob
@@ -1367,7 +1371,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsGlobToolConfigParams$Type/of "glob"))
+       (.type b (JsonValue/from "glob"))
        (.build b)))
     :grep
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofGrep
@@ -1378,7 +1382,7 @@
            :always-allow (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAllowPolicy (->tool-permission-policy permission-policy))
            :always-ask (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy permission-policy))
            :auto (.permissionPolicy b ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy permission-policy))))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsGrepToolConfigParams$Type/of "grep"))
+       (.type b (JsonValue/from "grep"))
        (.build b)))
     :web-fetch
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofWebFetch
@@ -1393,7 +1397,7 @@
        (when (contains? config-map :allowed-domains) (.allowedDomains b ^java.util.List (vec allowed-domains)))
        (when (contains? config-map :blocked-domains) (.blockedDomains b ^java.util.List (vec blocked-domains)))
        (when (contains? config-map :url-sources) (.urlSources b ^com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchUrlSourcesParams (->web-fetch-url-sources url-sources)))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams$Type/of "web_fetch"))
+       (.type b (JsonValue/from "web_fetch"))
        (.build b)))
     :web-search
     (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolConfigParams/ofWebSearch
@@ -1407,7 +1411,7 @@
        (when (contains? config-map :allowed-domains) (.allowedDomains b ^java.util.List (vec allowed-domains)))
        (when (contains? config-map :blocked-domains) (.blockedDomains b ^java.util.List (vec blocked-domains)))
        (when (contains? config-map :user-location) (.userLocation b (->user-location user-location)))
-       (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsWebSearchToolConfigParams$Type/of "web_search"))
+       (.type b (JsonValue/from "web_search"))
        (.build b)))))
 
 (defn- ->agent-toolset-20260401 ^com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401Params
@@ -1425,7 +1429,7 @@
             :always-ask (.permissionPolicy default-builder ^com.anthropic.models.beta.agents.BetaManagedAgentsAlwaysAskPolicy (->tool-permission-policy policy))
             :auto (.permissionPolicy default-builder ^com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy (->tool-permission-policy policy))))
         (.defaultConfig b (.build default-builder))))
-    (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401Params$Type/of "agent_toolset_20260401"))
+    (.type b (JsonValue/from "agent_toolset_20260401"))
     (.build b)))
 
 (defn- ->agent-create-tool ^AgentCreateParams$Tool [{:keys [type] :as tool}]
@@ -1457,20 +1461,20 @@
     (let [b (BetaManagedAgentsAgentParams/builder)]
       (.id b ^String (:id entry))
       (when (:version entry) (.version b (int (:version entry))))
-      (.type b (BetaManagedAgentsAgentParams$Type/of "agent"))
+      (.type b (JsonValue/from "agent"))
       (BetaManagedAgentsMultiagentRosterEntryParams/ofAgent (.build b)))
 
     (= :self (:type entry))
     (BetaManagedAgentsMultiagentRosterEntryParams/ofSelf
      (-> (BetaManagedAgentsMultiagentSelfParams/builder)
-         (.type (BetaManagedAgentsMultiagentSelfParams$Type/of "self"))
+         (.type (JsonValue/from "self"))
          (.build)))
 
     (= :advisor (:type entry))
     (BetaManagedAgentsMultiagentRosterEntryParams/ofAdvisor
      (-> (BetaManagedAgentsAdvisorParams/builder)
          (.model ^String (:model entry))
-         (.type (BetaManagedAgentsAdvisorParams$Type/of "advisor"))
+         (.type (JsonValue/from "advisor"))
          (.build)))
 
     :else
@@ -1480,7 +1484,7 @@
 
 (defn- ->multiagent-self ^BetaManagedAgentsMultiagentSelfParams []
   (-> (BetaManagedAgentsMultiagentSelfParams/builder)
-      (.type (BetaManagedAgentsMultiagentSelfParams$Type/of "self"))
+      (.type (JsonValue/from "self"))
       (.build)))
 
 (defn- ->multiagent-predefined-agent
@@ -1502,7 +1506,7 @@
     (let [b (BetaManagedAgentsAgentParams/builder)]
       (.id b ^String (:id entry))
       (when (:version entry) (.version b (int (:version entry))))
-      (.type b (BetaManagedAgentsAgentParams$Type/of "agent"))
+      (.type b (JsonValue/from "agent"))
       (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentPredefinedAgentParams/ofBetaManagedAgentsAgentParams
        (.build b)))
 
@@ -1582,7 +1586,7 @@
   (case type
     :coordinator
     (let [b (BetaManagedAgentsMultiagentCoordinatorParams/builder)]
-      (.type b (com.anthropic.models.beta.agents.BetaManagedAgentsMultiagentCoordinatorParams$Type/of "coordinator"))
+      (.type b (JsonValue/from "coordinator"))
     (doseq [entry agents]
       (.addAgent b (->agent-roster-entry entry)))
       (BetaManagedAgentsMultiagentParams/ofCoordinator (.build b)))
@@ -1664,7 +1668,7 @@
     :else {:type :unknown}))
 
 (defn- mcp-server->map [^BetaManagedAgentsMcpServerUrlDefinition s]
-  {:name (.name s) :url (.url s) :type (->keyword (.asString (.type s)))})
+  {:name (.name s) :url (.url s) :type (json-type->keyword s)})
 
 (defn- permission-policy->map [p]
   (cond
@@ -1903,7 +1907,7 @@
   (cond
     (.isCoordinator r)
     (let [^BetaManagedAgentsMultiagentCoordinator coordinator (.asCoordinator r)]
-      {:type (keyword (.asString (.type coordinator)))
+      {:type (json-type->keyword coordinator)
        :agents (mapv agent-ref->map (.agents coordinator))})
     (.isMultiagent20261001 r)
     (multiagent-20261001->map (.asMultiagent20261001 r))
@@ -1916,7 +1920,7 @@
            :version (.version r)
            :created-at (str (.createdAt r))
            :updated-at (str (.updatedAt r))
-           :type (keyword (.asString (.type r)))
+           :type (json-type->keyword r)
            :metadata (additional-properties->map (._additionalProperties (.metadata r)))}
     (unopt (.effort ^BetaManagedAgentsModelConfig (.model r)))
     (assoc :effort (model-effort->keyword
@@ -2066,7 +2070,7 @@
            :name (.name r)
            :model (.id ^BetaManagedAgentsModelConfig (.model r))
            :version (.version r)
-           :type (keyword (.asString (.type r)))
+           :type (json-type->keyword r)
            :mcp-servers (mapv mcp-server->map (.mcpServers r))
            :skills (mapv (fn [^com.anthropic.models.beta.sessions.BetaManagedAgentsSessionAgent$Skill s]
                            (cond-> {:type (if (.isAnthropic s) :anthropic :custom)
@@ -2097,7 +2101,7 @@
                                      (cond
                                        (.isCoordinator m)
                                        (let [coordinator (.asCoordinator m)]
-                                         {:type (->keyword (.asString (.type coordinator)))
+                                         {:type (json-type->keyword coordinator)
                                           :agents (mapv agent-ref->map (.agents coordinator))})
                                        (.isMultiagent20261001 m)
                                        (let [r (.asMultiagent20261001 m)]
@@ -2120,7 +2124,7 @@
                                        :else {:type :unknown})))))
 
 (defn- outcome-evaluation->map [^com.anthropic.models.beta.sessions.BetaManagedAgentsOutcomeEvaluationResource r]
-  (cond-> {:type (keyword (.asString (.type r)))
+  (cond-> {:type (json-type->keyword r)
            :description (.description r)
            :iteration (.iteration r)
            :outcome-id (.outcomeId r)
@@ -2134,7 +2138,7 @@
            :status (->keyword (.asString (.status r)))
            :stats (let [s (.stats r)] {:active-seconds (unopt (.activeSeconds s))
                                        :duration-seconds (unopt (.durationSeconds s))})
-           :type (keyword (.asString (.type r)))
+           :type (json-type->keyword r)
            :metadata (additional-properties->map (._additionalProperties (.metadata r)))
            :outcome-evaluations (mapv outcome-evaluation->map (.outcomeEvaluations r))
            :resources (mapv session-resource->map (.resources r))
@@ -2271,7 +2275,7 @@
         (if (string? block)
           (.addTextContent b ^String block)
           (.putAdditionalProperty b "content" (JsonValue/from block)))))
-    (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams$Type/of "user_message"))
+    (.type b (JsonValue/from "user_message"))
     (.build b)))
 
 (defn- ->system-message-event ^BetaManagedAgentsSystemMessageEventParams [{:keys [content]}]
@@ -2283,7 +2287,7 @@
         (if (string? block)
           (.addTextContent b ^String block)
           (.putAdditionalProperty b "content" (JsonValue/from block)))))
-    (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsSystemMessageEventParams$Type/of "system_message"))
+    (.type b (JsonValue/from "system_message"))
     (.build b)))
 
 (defn- ->outcome-rubric ^BetaManagedAgentsUserDefineOutcomeEventParams$Rubric [rubric]
@@ -2294,14 +2298,14 @@
       (when-not text (missing-key! :text))
       (let [b (BetaManagedAgentsTextRubricParams/builder)]
         (.content b ^String text)
-        (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsTextRubricParams$Type/of "text"))
+        (.type b (JsonValue/from "text"))
         (BetaManagedAgentsUserDefineOutcomeEventParams$Rubric/ofText (.build b))))
     :file
     (let [file-id (:file-id rubric)]
       (when-not file-id (missing-key! :file-id))
       (let [b (BetaManagedAgentsFileRubricParams/builder)]
         (.fileId b ^String file-id)
-        (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsFileRubricParams$Type/of "file"))
+        (.type b (JsonValue/from "file"))
         (BetaManagedAgentsUserDefineOutcomeEventParams$Rubric/ofFile (.build b))))
     (throw (ex-info (str "Unknown rubric type " (:type rubric))
                     {:anthropic/error :unknown-rubric-type :type (:type rubric)}))))
@@ -2312,7 +2316,7 @@
   (let [b (BetaManagedAgentsUserDefineOutcomeEventParams/builder)]
     (.description b ^String description)
     (.rubric b (->outcome-rubric rubric))
-    (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserDefineOutcomeEventParams$Type/of "user_define_outcome"))
+    (.type b (JsonValue/from "user_define_outcome"))
     (when max-iterations (.maxIterations b (int max-iterations)))
     (.build b)))
 
@@ -2324,7 +2328,7 @@
     :user-interrupt
     (BetaManagedAgentsEventParams/ofUserInterrupt
      (let [b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEventParams/builder)]
-       (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEventParams$Type/of "user_interrupt"))
+       (.type b (JsonValue/from "user_interrupt"))
        (when (:session-thread-id event) (.sessionThreadId b ^String (:session-thread-id event)))
        (.build b)))
     :user-tool-confirmation
@@ -2333,14 +2337,14 @@
        (.toolUseId b ^String (:tool-use-id event))
        (.result b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams$Result/of
                    (name (:result event))))
-       (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams$Type/of "user_tool_confirmation"))
+       (.type b (JsonValue/from "user_tool_confirmation"))
        (when (:deny-message event) (.denyMessage b ^String (:deny-message event)))
        (.build b)))
     :user-custom-tool-result
     (BetaManagedAgentsEventParams/ofUserCustomToolResult
      (let [b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEventParams/builder)]
        (.customToolUseId b ^String (:custom-tool-use-id event))
-       (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEventParams$Type/of "user_custom_tool_result"))
+       (.type b (JsonValue/from "user_custom_tool_result"))
        (when (contains? event :is-error) (.isError b (boolean (:is-error event))))
        (doseq [content (:content event)]
          (when (= :text (:type content)) (.addTextContent b ^String (:text content))))
@@ -2349,7 +2353,7 @@
     (BetaManagedAgentsEventParams/ofUserToolResult
      (let [b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolResultEventParams/builder)]
        (.toolUseId b ^String (:tool-use-id event))
-       (.type b (com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolResultEventParams$Type/of "user_tool_result"))
+       (.type b (JsonValue/from "user_tool_result"))
        (when (contains? event :is-error) (.isError b (boolean (:is-error event))))
        (doseq [content (:content event)]
          (when (= :text (:type content)) (.addTextContent b ^String (:text content))))
@@ -2395,7 +2399,7 @@
                          {:type :base64 :media-type (.mediaType s) :data (.data s)})
     (.isText source) (let [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsPlainTextDocumentSource s
                            (.asText source)]
-                       {:type :text :media-type (.asString (.mediaType s)) :data (.data s)})
+                       {:type :text :media-type (.convert (._mediaType s) String) :data (.data s)})
     (.isUrl source) {:type :url :url (.url (.asUrl source))}
     :else {:type :file :file-id (.fileId (.asFile source))}))
 
@@ -2870,7 +2874,7 @@
     (unopt (.usage r)) (assoc :usage (usage->map (unopt (.usage r))))
     (unopt (.stats r)) (assoc :stats (session-thread-stats->map (unopt (.stats r))))
     (unopt (.workflowRunId r)) (assoc :workflow-run-id (unopt (.workflowRunId r)))
-    (.type r) (assoc :type (->keyword (.asString (.type r))))))
+    true (assoc :type (json-type->keyword r))))
 
 (defn get-session-thread
   "Get a session thread by session id and thread id."
@@ -2927,14 +2931,14 @@
                 (when-not name (missing-key! :name))
                 (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsBranchCheckout/builder)]
                   (.name b ^String name)
-                  (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsBranchCheckout$Type/of "branch"))
+                  (.type b (JsonValue/from "branch"))
                   (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams$Checkout/ofBranch
                    (.build b))))
       :commit (let [sha (:sha checkout)]
                 (when-not sha (missing-key! :sha))
                 (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsCommitCheckout/builder)]
                   (.sha b ^String sha)
-                  (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsCommitCheckout$Type/of "commit"))
+                  (.type b (JsonValue/from "commit"))
                   (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams$Checkout/ofCommit
                    (.build b))))
       (throw (ex-info (str "Unknown checkout type " (:type checkout))
@@ -2960,7 +2964,7 @@
   (let [resource (com.anthropic.models.beta.sessions.BetaManagedAgentsFileResourceParams/builder)
         b (com.anthropic.models.beta.sessions.resources.ResourceAddParams/builder)]
     (.fileId resource ^String file-id)
-    (.type resource (com.anthropic.models.beta.sessions.BetaManagedAgentsFileResourceParams$Type/of "file"))
+    (.type resource (JsonValue/from "file"))
     (when mount-path (.mountPath resource ^String mount-path))
     (.sessionId b ^String session-id)
     (.betaManagedAgentsFileResourceParams b (.build resource))
@@ -3127,13 +3131,13 @@
   (case (:type resource)
     :file (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsFileResourceParams/builder)]
             (when-not (:file-id resource) (missing-key! :file-id))
-            (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsFileResourceParams$Type/of "file"))
+            (.type b (JsonValue/from "file"))
             (.fileId b ^String (:file-id resource))
             (when (:mount-path resource) (.mountPath b ^String (:mount-path resource)))
             (.build b))
     :github-repository (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams/builder)]
                          (when-not (:url resource) (missing-key! :url))
-                         (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams$Type/of "github_repository"))
+                         (.type b (JsonValue/from "github_repository"))
                          (.url b ^String (:url resource))
                          (when (:authorization-token resource)
                            (.authorizationToken b ^String (:authorization-token resource)))
@@ -3144,7 +3148,7 @@
                          (.build b))
     :memory-store (let [b (com.anthropic.models.beta.sessions.BetaManagedAgentsMemoryStoreResourceParam/builder)]
                     (when-not (:memory-store-id resource) (missing-key! :memory-store-id))
-                    (.type b (com.anthropic.models.beta.sessions.BetaManagedAgentsMemoryStoreResourceParam$Type/of "memory_store"))
+                    (.type b (JsonValue/from "memory_store"))
                     (.memoryStoreId b ^String (:memory-store-id resource))
                     (when (:access resource)
                       (.access b ^com.anthropic.models.beta.sessions.BetaManagedAgentsMemoryStoreResourceParam$Access
@@ -3160,7 +3164,7 @@
   (let [b (com.anthropic.models.beta.deployments.BetaManagedAgentsScheduleParams/builder)]
     (when expression (.expression b ^String expression))
     (when timezone (.timezone b ^String timezone))
-    (when type (.type b (com.anthropic.models.beta.deployments.BetaManagedAgentsScheduleParams$Type/of (name type))))
+    (when type (.type b (JsonValue/from (name type))))
     (.build b)))
 
 (defn- ->deployment-create-params ^DeploymentCreateParams
@@ -3249,7 +3253,7 @@
 (defn- deployment-schedule->map [^com.anthropic.models.beta.deployments.BetaManagedAgentsSchedule r]
   (cond-> {:expression (.expression r)
            :timezone (.timezone r)
-           :type (keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.lastRunAt r)) (assoc :last-run-at (str (unopt (.lastRunAt r))))
     (unopt (.upcomingRunsAt r)) (assoc :upcoming-runs-at (mapv str (unopt (.upcomingRunsAt r))))))
 
@@ -3303,7 +3307,7 @@
            :resources (mapv deployment-resource->map (.resources r))
            :initial-events (mapv deployment-initial-event->map (.initialEvents r))
            :metadata (deployment-metadata->map (.metadata r))
-           :type (keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.description r)) (assoc :description (unopt (.description r)))
     (unopt (.archivedAt r)) (assoc :archived-at (str (unopt (.archivedAt r))))
     (unopt (.pausedReason r)) (assoc :paused-reason (str (unopt (.pausedReason r))))
@@ -3374,37 +3378,37 @@
     (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsDeploymentRun$Error e e]
       (cond
     (.isEnvironmentArchived e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentArchivedRunError x (.asEnvironmentArchived e)]
-                                  {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                  {:type (json-type->keyword x) :message (.message x)})
     (.isAgentArchived e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsAgentArchivedRunError x (.asAgentArchived e)]
-                           {:type (->keyword (.asString (.type x))) :message (.message x)})
+                           {:type (json-type->keyword x) :message (.message x)})
     (.isEnvironmentNotFound e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsEnvironmentNotFoundRunError x (.asEnvironmentNotFound e)]
-                                 {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                 {:type (json-type->keyword x) :message (.message x)})
     (.isVaultNotFound e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultNotFoundRunError x (.asVaultNotFound e)]
-                          {:type (->keyword (.asString (.type x))) :message (.message x)})
+                          {:type (json-type->keyword x) :message (.message x)})
     (.isVaultArchived e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsVaultArchivedRunError x (.asVaultArchived e)]
-                           {:type (->keyword (.asString (.type x))) :message (.message x)})
+                           {:type (json-type->keyword x) :message (.message x)})
     (.isFileNotFound e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsFileNotFoundRunError x (.asFileNotFound e)]
-                         {:type (->keyword (.asString (.type x))) :message (.message x)})
+                         {:type (json-type->keyword x) :message (.message x)})
     (.isMemoryStoreArchived e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMemoryStoreArchivedRunError x (.asMemoryStoreArchived e)]
-                                 {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                 {:type (json-type->keyword x) :message (.message x)})
     (.isSkillNotFound e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSkillNotFoundRunError x (.asSkillNotFound e)]
-                          {:type (->keyword (.asString (.type x))) :message (.message x)})
+                          {:type (json-type->keyword x) :message (.message x)})
     (.isSessionResourceNotFound e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionResourceNotFoundRunError x (.asSessionResourceNotFound e)]
-                                    {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                    {:type (json-type->keyword x) :message (.message x)})
     (.isWorkspaceArchived e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsWorkspaceArchivedRunError x (.asWorkspaceArchived e)]
-                               {:type (->keyword (.asString (.type x))) :message (.message x)})
+                               {:type (json-type->keyword x) :message (.message x)})
     (.isOrganizationDisabled e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsOrganizationDisabledRunError x (.asOrganizationDisabled e)]
-                                  {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                  {:type (json-type->keyword x) :message (.message x)})
     (.isSessionRateLimited e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionRateLimitedRunError x (.asSessionRateLimited e)]
-                                {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                {:type (json-type->keyword x) :message (.message x)})
     (.isSessionCreationRejected e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSessionCreationRejectedRunError x (.asSessionCreationRejected e)]
-                                    {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                    {:type (json-type->keyword x) :message (.message x)})
     (.isUnknown e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsUnknownRunError x (.asUnknown e)]
-                     {:type (->keyword (.asString (.type x))) :message (.message x)})
+                     {:type (json-type->keyword x) :message (.message x)})
     (.isSelfHostedResourcesUnsupported e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsSelfHostedResourcesUnsupportedRunError x (.asSelfHostedResourcesUnsupported e)]
-                                           {:type (->keyword (.asString (.type x))) :message (.message x)})
+                                           {:type (json-type->keyword x) :message (.message x)})
     (.isMcpEgressBlocked e) (let [^com.anthropic.models.beta.deploymentruns.BetaManagedAgentsMcpEgressBlockedRunError x (.asMcpEgressBlocked e)]
-                              {:type (->keyword (.asString (.type x))) :message (.message x)})
+                              {:type (json-type->keyword x) :message (.message x)})
     :else (throw (ex-info "Unsupported deployment run error"
                           {:anthropic/error :unknown-deployment-run-error-type}))))))
 
@@ -3427,7 +3431,7 @@
            :agent (agent-ref->map (.agent r))
            :deployment-id (.deploymentId r)
            :created-at (str (.createdAt r))
-           :type (->keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.sessionId r)) (assoc :session-id (unopt (.sessionId r)))
     (unopt (.error r)) (assoc :error (deployment-run-error->map (unopt (.error r))))
     (.triggerContext r) (assoc :trigger-context (deployment-run-trigger-context->map (.triggerContext r)))))
@@ -3595,7 +3599,7 @@
     (unopt (.scope r)) (assoc :scope (keyword (.asString ^com.anthropic.models.beta.environments.BetaEnvironment$Scope (unopt (.scope r)))))))
 
 (defn- environment-delete->map [^BetaEnvironmentDeleteResponse r]
-  {:id (.id r) :deleted true :type (keyword (.asString (.type r)))})
+  {:id (.id r) :deleted true :type (keyword (.convert (._type r) String))})
 
 (defn create-environment
   "Create an environment: `:name` (required), `:description`, `:metadata`,
@@ -3859,11 +3863,11 @@
            :created-at (str (.createdAt r))
            :updated-at (str (.updatedAt r))
            :metadata (additional-properties->map (._additionalProperties ^com.anthropic.models.beta.vaults.BetaManagedAgentsVault$Metadata (.metadata r)))
-           :type (keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.archivedAt r)) (assoc :archived-at (str (unopt (.archivedAt r))))))
 
 (defn- vault-delete->map [^BetaManagedAgentsDeletedVault r]
-  {:id (.id r) :deleted true :type (keyword (.asString (.type r)))})
+  {:id (.id r) :deleted true :type (keyword (.convert (._type r) String))})
 
 (defn create-vault
   "Create a vault: `:display-name` (required), `:metadata`, and `:betas`. Credentials are
@@ -4040,7 +4044,9 @@
   (case (keyword type)
     :create-new
     (com.anthropic.models.beta.dreams.BetaOutputBehavior/ofCreateNew
-     (com.anthropic.models.beta.dreams.BetaOutputBehaviorCreateNew$Type/of "create_new"))
+     (-> (com.anthropic.models.beta.dreams.BetaOutputBehaviorCreateNew/builder)
+         (.type (JsonValue/from "create_new"))
+         (.build)))
     :update-existing
     (do
       (when-not memory-store-id (missing-key! :memory-store-id))
@@ -4069,7 +4075,7 @@
   (let [output-behavior (.outputBehavior r)]
     (cond-> {:id (.id r) :status (->keyword (.asString (.status r))) :created-at (str (.createdAt r))
            :inputs (vec (.inputs r)) :outputs (vec (.outputs r))
-           :type (->keyword (.asString (.type r)))
+           :type (json-type->keyword r)
            :output-behavior (cond
                               (.isCreateNew output-behavior) {:type :create-new}
                               (.isUpdateExisting output-behavior)
@@ -4104,7 +4110,7 @@
 
 (defn- credential->map [^com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsCredential r]
   (cond-> {:id (.id r) :vault-id (.vaultId r) :created-at (str (.createdAt r)) :updated-at (str (.updatedAt r))
-           :type (keyword (.asString (.type r)))
+           :type (json-type->keyword r)
            :metadata (additional-properties->map (._additionalProperties (.metadata r)))
            :auth (cond
                    (.isMcpOAuth (.auth r)) {:type :mcp-oauth :mcp-server-url (.mcpServerUrl (.asMcpOAuth (.auth r)))}
@@ -4140,7 +4146,7 @@
         ^com.anthropic.models.beta.vaults.credentials.BetaManagedAgentsRefreshObject refresh (unopt (.refresh r))]
     (cond-> {:credential-id (.credentialId r) :vault-id (.vaultId r)
              :has-refresh-token (.hasRefreshToken r) :status (keyword (str (.status r)))
-             :type (->keyword (.asString (.type r)))
+             :type (json-type->keyword r)
              :validated-at (str (.validatedAt r))}
       probe (assoc :mcp-probe
                    (cond-> {:method (.method probe)}
@@ -4167,7 +4173,7 @@
        (mapv credential->map (.autoPager p))))))
 (defn update-vault-credential [^AnthropicClient client ^String vault-id ^String credential-id changes] (with-api-errors (credential->map (-> (.beta client) (.vaults) (.credentials) (.update (->credential-update-params vault-id credential-id changes))))))
 (defn archive-vault-credential [^AnthropicClient client ^String vault-id ^String credential-id] (with-api-errors (credential->map (-> (.beta client) (.vaults) (.credentials) (.archive (->credential-archive-params vault-id credential-id))))))
-(defn delete-vault-credential [^AnthropicClient client ^String vault-id ^String credential-id] (with-api-errors (let [r (-> (.beta client) (.vaults) (.credentials) (.delete (->credential-delete-params vault-id credential-id)))] {:id (.id r) :deleted true :type (keyword (.asString (.type r)))})))
+(defn delete-vault-credential [^AnthropicClient client ^String vault-id ^String credential-id] (with-api-errors (let [r (-> (.beta client) (.vaults) (.credentials) (.delete (->credential-delete-params vault-id credential-id)))] {:id (.id r) :deleted true :type (json-type->keyword r)})))
 (defn mcp-oauth-validate-vault-credential [^AnthropicClient client ^String vault-id ^String credential-id]
   (with-api-errors (credential-validation->map (-> (.beta client) (.vaults) (.credentials)
                                                      (.mcpOAuthValidate (->credential-mcp-oauth-validate-params vault-id credential-id))))))
@@ -4280,7 +4286,7 @@
            :created-at (str (.createdAt r))
            :updated-at (str (.updatedAt r))
            :metadata (additional-properties->map (._additionalProperties (.metadata r)))
-           :type (keyword (.asString (.type r)))}
+           :type (json-type->keyword r)}
     (unopt (.name r)) (assoc :name (unopt (.name r)))
     (unopt (.externalId r)) (assoc :external-id (unopt (.externalId r)))
     (unopt (.externalUserDetails r))
@@ -4460,6 +4466,12 @@
     (.isAgentArchived d) (webhook-generic->map (.asAgentArchived d) :agent-archived)
     (.isAgentDeleted d) (webhook-generic->map (.asAgentDeleted d) :agent-deleted)
     (.isAgentUpdated d) (webhook-generic->map (.asAgentUpdated d) :agent-updated)
+    (.isUserProfileEnforcementActionOpened d)
+    (webhook-generic->map (.asUserProfileEnforcementActionOpened d)
+                          :user-profile-enforcement-action-opened)
+    (.isUserProfileEnforcementActionResolved d)
+    (webhook-generic->map (.asUserProfileEnforcementActionResolved d)
+                          :user-profile-enforcement-action-resolved)
     :else {:type :unknown}))
 
 (defn- webhook-event->map [^UnwrapWebhookEvent r]

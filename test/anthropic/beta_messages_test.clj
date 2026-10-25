@@ -3,8 +3,8 @@
             [clojure.string :as str]
             [anthropic.beta.messages :as messages]
             [anthropic.core])
-  (:import (com.anthropic.core JsonValue RequestOptions)
-           (com.anthropic.core.http StreamResponse)
+  (:import (com.anthropic.core ClientOptions JsonValue RequestOptions)
+           (com.anthropic.core.http HttpClient StreamResponse)
            (com.anthropic.helpers BetaToolRunner)
            (com.anthropic.models.beta.messages BetaMessage BetaTextBlock BetaUsage BetaTool
                                                BetaMessageTokensCount BetaCacheCreation BetaContainer MessageCountTokensParams
@@ -48,32 +48,43 @@
     (is (.isBetweenTools thinking))))
 
 (deftest beta-message-param-new-fields
-  (let [p (-> (com.anthropic.models.beta.messages.BetaMessageParam/builder)
+  (let [p (-> (com.anthropic.models.beta.messages.BetaSystemMessageParam/builder)
               (.content "hello")
-              (.role (com.anthropic.models.beta.messages.BetaMessageParam$Role/of "user"))
-              (.clearAt (com.anthropic.models.beta.messages.BetaMessageParam$ClearAt/of "next_user_message"))
+              (.clearAt (com.anthropic.models.beta.messages.BetaSystemMessageParam$ClearAt/of "next_user_message"))
               (.outputConfig (-> (com.anthropic.models.beta.messages.BetaSystemMessageOutputConfig/builder)
                                  (.effort (com.anthropic.models.beta.messages.BetaSystemMessageOutputConfig$Effort/of "high"))
                                  (.build)))
               (.build))
+        p (com.anthropic.models.beta.messages.BetaMessageParam/ofSystem p)
         m (beta-message-param->map p)]
     (is (= :next-user-message (:clear-at m)))
-    (is (= :high (get-in m [:output-config :effort])))))
-  (let [p (-> (com.anthropic.models.beta.messages.BetaMessageParam/builder)
+    (is (= :high (get-in m [:output-config :effort]))))
+  (let [p (-> (com.anthropic.models.beta.messages.BetaSystemMessageParam/builder)
               (.content "hello")
-              (.role (com.anthropic.models.beta.messages.BetaMessageParam$Role/of "user"))
               (.outputConfig (.build (com.anthropic.models.beta.messages.BetaSystemMessageOutputConfig/builder)))
-              (.build))]
+              (.build))
+        p (com.anthropic.models.beta.messages.BetaMessageParam/ofSystem p)]
     (is (not (contains? (:output-config (beta-message-param->map p)) :effort))))
   (let [^MessageCreateParams params
-        (->params {:messages [{:role :user :content "hello"
+        (->params {:messages [{:role :system :content "hello"
                                :clear-at :next-user-message
                                :output-config {:effort :high}}]})
         ^com.anthropic.models.beta.messages.BetaMessageParam message (first (.messages params))
-        config (.get (.outputConfig message))
+        config (.get (.outputConfig (.get (.system message))))
         effort (.get (.effort config))]
-    (is (= "NEXT_USER_MESSAGE" (.asString (.get (.clearAt message)))))
-    (is (= "HIGH" (.asString effort))))
+    (is (= "NEXT_USER_MESSAGE" (.asString (.get (.clearAt (.get (.system message)))))))
+    (is (= "HIGH" (.asString effort)))))
+
+(deftest beta-message-param-union-round-trips
+  (let [^MessageCreateParams params
+        (->params {:messages [{:role :user :content "hello"}
+                              {:role :assistant
+                               :content [{:type :text :text "hi"}]}
+                              {:role :system :content "be concise"}]})]
+    (is (= [{:role :user :content "hello"}
+            {:role :assistant :content [{:type :text :text "hi"}]}
+            {:role :system :content "be concise"}]
+           (mapv beta-message-param->map (.messages params))))))
 
 (deftest beta-message-targeted-enum-conversion
   (let [keywordize-types #'messages/keywordize-types
@@ -162,11 +173,21 @@
                   (countTokens [_ _] nil)
                   (toolRunner [_ _] nil))]
     (BetaToolRunner. service
+                     (-> (ClientOptions/builder)
+                         (.httpClient (reify HttpClient
+                                        (execute [_ _ _] nil)
+                                        (executeAsync [_ _ _]
+                                          (java.util.concurrent.CompletableFuture/completedFuture nil))
+                                        (close [_])))
+                         (.build))
                      (let [p (->params initial-params)]
                        (-> (com.anthropic.models.beta.messages.ToolRunnerCreateParams/builder)
                            (.initialMessageParams p)
                            (.build)))
-                     (RequestOptions/none)))))
+                     (RequestOptions/none) nil))))
+
+(deftest tool-runner-constructs-on-3x
+  (is (instance? BetaToolRunner (beta-test-runner [] []))))
 
 (defn- beta-test-stream-response [events closed?]
   (reify StreamResponse
@@ -835,7 +856,7 @@
                                          {:type :tool-result
                                           :tool-use-id "toolu_123"
                                           :content "sunny"}]}]})]
-    (is (= 3 (count (.asBetaContentBlockParams (.content (first (.messages p)))))))))
+    (is (= 3 (count (.asContentBlockParams (.get (.content (first (.messages p))))))))))
 
 (deftest beta-2-56-message-content-additions
   (let [image (.asImage (->content-block
