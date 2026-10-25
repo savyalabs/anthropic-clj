@@ -1361,3 +1361,23 @@
           (is (some? (opt (.trigger compact))))
           (let [trigger (opt (.trigger compact))]
             (is (= 1000 (.value trigger)))))))))
+
+(deftest beta-message-thread-param-builds-params
+  (let [^MessageCreateParams continued (->params {:messages [{:role :user :content "next"}]
+                                                  :thread {:previous-message-id "msg_1"}})
+        ^MessageCreateParams created (->params {:messages [{:role :user :content "start"}]
+                                                :thread {:type :create}})
+        ^BatchCreateParams batch (->batch-create-params
+                                  {:requests [{:custom-id "r1"
+                                               :params {:messages [{:role :user :content "next"}]
+                                                        :thread {:previous-message-id "msg_2"}}}]})
+        batch-thread (.get (.thread (.params (first (.requests batch)))))]
+    (is (.isContinue (.get (.thread continued))))
+    (is (= "msg_1" (.previousMessageId (.asContinue (.get (.thread continued))))))
+    (is (.isCreate (.get (.thread created))))
+    (is (= "msg_2" (.previousMessageId (.asContinue batch-thread))))
+    (is (= {"type" "continue" "previous_message_id" "msg_1"}
+           (.convert (JsonValue/from (.get (.thread continued))) java.util.Map)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"thread"
+                          (->params {:messages [{:role :user :content "x"}]
+                                     :thread {:type :fork}})))))

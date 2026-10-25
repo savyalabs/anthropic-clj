@@ -1152,11 +1152,11 @@
 
 (deftest usage-cache-tokens
   (testing "cache tokens are included when present"
-    (is (= {:input-tokens 10 :output-tokens 20
+    (is (= {:input-tokens 10 :output-tokens 20 :speed :standard
             :cache-creation-input-tokens 3 :cache-read-input-tokens 7}
            (usage->map (usage 10 20 3 7)))))
   (testing "absent cache tokens leave the keys off"
-    (is (= {:input-tokens 10 :output-tokens 20}
+    (is (= {:input-tokens 10 :output-tokens 20 :speed :standard}
            (usage->map (usage 10 20 nil nil))))))
 
 (deftest usage-completeness
@@ -1190,6 +1190,7 @@
             :cache-creation {:ephemeral-1h-input-tokens 3
                              :ephemeral-5m-input-tokens 4}
             :inference-geo "us"
+            :speed :standard
             :output-tokens-details {:thinking-tokens 5}}
            (usage->map u)))))
 
@@ -1557,7 +1558,7 @@
                      (.message message)
                      (.build)))]
       (is (= "msg_stream" (get-in (event->map event) [:message :id])))
-      (is (= {:input-tokens 3 :output-tokens 0}
+      (is (= {:input-tokens 3 :output-tokens 0 :speed :standard}
              (get-in (event->map event) [:message :usage])))))
   (testing "message delta includes usage and all stop metadata"
     (let [delta (-> (com.anthropic.models.messages.RawMessageDeltaEvent$Delta/builder)
@@ -2041,3 +2042,67 @@
                         (beta->count-tool (assoc spec :version version))]]
       (is (.isAll (opt (.userInput (opt (.urlSources count-tool)))))
           (str "count-tokens " version " URL sources")))))
+
+(deftest client-configure-reaches-open-telemetry-options
+  ;; The SDK enables tracing by default, so check both directions to show the
+  ;; :configure hook really sets the option.
+  (doseq [enabled [true false]]
+    (let [^com.anthropic.client.AnthropicClient c
+          (a/client {:api-key "test-key"
+                     :configure #(.openTelemetry ^com.anthropic.client.okhttp.AnthropicOkHttpClient$Builder %
+                                                 (boolean enabled))})]
+      (is (= (com.anthropic.core.opentelemetry.OpenTelemetryOptions/ofEnabled enabled)
+             (.openTelemetry (.options c)))))))
+
+(deftest stable-speed-builds-params-and-usage-converts
+  (let [^com.anthropic.models.messages.MessageCreateParams p
+        (->params {:messages [{:role :user :content "hi"}] :speed :fast})
+        ^com.anthropic.models.messages.MessageCountTokensParams c
+        (->count-params {:messages [{:role :user :content "hi"}] :speed :standard})
+        ^com.anthropic.models.messages.batches.BatchCreateParams$Request$Params batch
+        (#'a/->batch-req-params {:messages [{:role :user :content "hi"}] :speed :fast})
+        usage (-> (com.anthropic.models.messages.Usage/builder)
+                  (.inputTokens 1) (.outputTokens 2)
+                  (.cacheCreation (java.util.Optional/empty))
+                  (.cacheCreationInputTokens (java.util.Optional/empty))
+                  (.cacheReadInputTokens (java.util.Optional/empty))
+                  (.inferenceGeo (java.util.Optional/empty))
+                  (.outputTokensDetails (java.util.Optional/empty))
+                  (.serverToolUse (java.util.Optional/empty))
+                  (.serviceTier (java.util.Optional/empty))
+                  (.speed com.anthropic.models.messages.Usage$Speed/FAST)
+                  (.build))]
+    (is (= "fast" (.asString (.get (.speed p)))))
+    (is (= "standard" (.asString (.get (.speed c)))))
+    (is (= "fast" (.asString (.get (.speed batch)))))
+    (is (= :fast (:speed (usage->map usage))))
+    (is (= :invalid-enum-value
+           (:anthropic/error
+            (ex-data (try (->params {:messages [] :speed :warp}) nil
+                          (catch clojure.lang.ExceptionInfo e e))))))))
+
+(deftest request-options-follow-redirects
+  (let [^com.anthropic.core.RequestOptions stable (#'a/->request-options {:follow-redirects false})
+        ^com.anthropic.core.RequestOptions beta (#'anthropic.beta.messages/->request-options
+                                                 {:follow-redirects true})]
+    (is (= false (.orElse (.followRedirects stable) nil)))
+    (is (= true (.orElse (.followRedirects beta) nil)))))
+
+(deftest model-capabilities-between-tools-passes-through
+  (let [caps (.readValue (com.anthropic.core.JsonValue/access$getJSON_MAPPER$cp)
+                         "{\"thinking\":{\"supported\":true,\"types\":{\"between_tools\":{\"supported\":true}}}}"
+                         com.anthropic.models.models.ModelCapabilities)
+        info (-> (ModelInfo/builder)
+                 (.id "claude-capable")
+                 (.displayName "Claude Capable")
+                 (.createdAt (java.time.OffsetDateTime/parse "2026-01-01T00:00:00Z"))
+                 (.lifecycle (com.anthropic.models.models.ModelInfo$Lifecycle/of "active"))
+                 (.capabilities caps)
+                 (.maxInputTokens (java.util.Optional/empty))
+                 (.maxTokens (java.util.Optional/empty))
+                 (.deprecatedAt (java.util.Optional/empty))
+                 (.retiresAt (java.util.Optional/empty))
+                 (.line (java.util.Optional/empty))
+                 (.build))]
+    (is (= {:supported true}
+           (get-in (#'a/model->map info) [:capabilities :thinking :types :between-tools])))))

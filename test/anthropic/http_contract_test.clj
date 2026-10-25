@@ -180,3 +180,109 @@
                    (is (= "POST" (:method (first @requests))))
                    (is (= "text/event-stream" (get-in (first @requests) [:headers "accept"])))
                    (is (= ["hello " "stream"] @events))))))
+
+(defn- numbered-beta-response [n]
+  (json/write-value-as-string
+   {:id (str "msg_" n)
+    :type "message"
+    :role "assistant"
+    :model "claude-sonnet-4-5"
+    :content [{:type "text" :text (str "reply " n)}]
+    :stop_reason "end_turn"
+    :stop_sequence nil
+    :usage {:input_tokens 1 :output_tokens 1}}))
+
+(deftest thread-create-send-append-fork
+  (let [counter (atom 0)]
+    (with-server (fn [exchange _]
+                   (respond! exchange 200 "application/json"
+                             (numbered-beta-response (swap! counter inc))))
+                 (fn [{:keys [base-url requests]}]
+                   (let [client (a/client {:api-key "test-key" :base-url base-url})
+                         thread (beta/create-beta-thread client (message-request))
+                         first-reply (beta/thread-send thread)
+                         _ (is (= "msg_1" (beta/thread-previous-message-id thread)))
+                         second-reply (beta/thread-send thread "again")
+                         forked (beta/thread-fork thread)
+                         fork-reply (beta/thread-send forked {:role :user :content "forked"})
+                         _ (beta/thread-append thread {:role :user :content "appended"})
+                         third-reply (beta/thread-send thread)
+                         bodies (mapv #(json/read-value (:body %) json-mapper) @requests)]
+                     (is (= ["msg_1" "msg_2" "msg_3" "msg_4"]
+                            (mapv :id [first-reply second-reply fork-reply third-reply])))
+                     (is (= "reply 2" (get-in second-reply [:content 0 :text])))
+                     ;; The first send opens a server-side thread...
+                     (is (= {:type "create"} (:thread (bodies 0))))
+                     (is (= [{:role "user" :content "hello"}] (:messages (bodies 0))))
+                     ;; ...and the next send carries only the new turn plus the
+                     ;; first reply's id, not the whole history.
+                     (is (= {:type "continue" :previous_message_id "msg_1"} (:thread (bodies 1))))
+                     (is (= [{:role "user" :content "again"}] (:messages (bodies 1))))
+                     ;; A fork replays the full local history into a new thread.
+                     (is (= {:type "create"} (:thread (bodies 2))))
+                     (is (= ["user" "assistant" "user" "assistant" "user"]
+                            (mapv :role (:messages (bodies 2)))))
+                     (is (= "forked" (:content (last (:messages (bodies 2))))))
+                     ;; Appended turns go out with the next send.
+                     (is (= {:type "continue" :previous_message_id "msg_2"} (:thread (bodies 3))))
+                     (is (= [{:role "user" :content "appended"}] (:messages (bodies 3))))
+                     (is (= "msg_4" (:id (beta/thread-last-message thread))))
+                     (is (= "msg_4" (beta/thread-previous-message-id thread)))
+                     (is (= {:role :user :content "hello"} (first (beta/thread-messages thread))))
+                     (is (= [:user :assistant :user :assistant :user :assistant]
+                            (mapv :role (beta/thread-messages thread)))))))))
+
+(deftest thread-send-streaming-contract
+  (with-server (fn [exchange _]
+                 (respond! exchange 200 "text/event-stream" sse-response))
+               (fn [{:keys [base-url requests]}]
+                 (let [thread (beta/create-beta-thread
+                               (a/client {:api-key "test-key" :base-url base-url})
+                               (message-request))
+                       events (atom [])
+                       text (beta/thread-send-streaming thread "stream please" #(swap! events conj %))
+                       body (json/read-value (:body (first @requests)) json-mapper)]
+                   (is (= "hello stream" text))
+                   (is (= :message-start (:type (first @events))))
+                   (is (= :message-stop (:type (last @events))))
+                   (is (= true (:stream body)))
+                   (is (= ["hello" "stream please"] (mapv :content (:messages body))))
+                   (is (= "msg_stream" (beta/thread-previous-message-id thread)))
+                   (is (= "hello stream" (get-in (beta/thread-last-message thread) [:content 0 :text])))))))
+
+(deftest thread-update-and-unsupported-behavior
+  (let [counter (atom 0)]
+    (with-server (fn [exchange _]
+                   (respond! exchange 200 "application/json"
+                             (numbered-beta-response (swap! counter inc))))
+                 (fn [{:keys [base-url requests]}]
+                   (let [thread (beta/create-beta-thread
+                                 (a/client {:api-key "test-key" :base-url base-url})
+                                 (assoc (message-request)
+                                        :system "be brief"
+                                        :temperature 0.5
+                                        :unsupported-request-behavior :continue-unthreaded))]
+                     (beta/thread-send thread)
+                     (beta/thread-update thread {:max-tokens 64 :model "claude-opus-5-5"})
+                     (beta/thread-send thread "more")
+                     (let [[first-body second-body] (mapv #(json/read-value (:body %) json-mapper) @requests)]
+                       (is (= "be brief" (:system first-body)))
+                       (is (= 0.5 (:temperature first-body)))
+                       (is (= 64 (:max_tokens second-body)))
+                       (is (= "claude-opus-5-5" (:model second-body)))
+                       (is (= "msg_1" (get-in second-body [:thread :previous_message_id])))))))))
+
+(deftest thread-tool-runner-runs-within-thread
+  (let [counter (atom 0)]
+    (with-server (fn [exchange _]
+                   (respond! exchange 200 "application/json"
+                             (numbered-beta-response (swap! counter inc))))
+                 (fn [{:keys [base-url requests]}]
+                   (let [thread (beta/create-beta-thread
+                                 (a/client {:api-key "test-key" :base-url base-url})
+                                 (message-request))
+                         runner (beta/thread-tool-runner thread)
+                         replies (doall ((:messages runner)))
+                         body (json/read-value (:body (first @requests)) json-mapper)]
+                     (is (= ["msg_1"] (mapv :id replies)))
+                     (is (= [{:role "user" :content "hello"}] (:messages body))))))))

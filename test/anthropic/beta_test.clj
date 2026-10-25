@@ -324,6 +324,7 @@
                            :structured-outputs {:supported true}
                            :thinking {:supported true
                                       :types {:adaptive {:supported true}
+                                              :between-tools {:supported true}
                                               :disabled {:supported true}
                                               :enabled {:supported true}}}}
             :type :model}
@@ -1975,7 +1976,10 @@
                    (.build))))
              (.type (JsonValue/from "multiagent_20261001"))
              (.build)))]
-    (is (= (expected-multiagent-20261001)
+    ;; Session predefined agents are full snapshots, so they carry the
+    ;; execution identity that agent references lack.
+    (is (= (update-in (expected-multiagent-20261001) [:subagents :predefined-agents]
+                      (partial mapv #(assoc % :execution-identity {:type :service-account})))
            (:multiagent (session-agent->map (session-agent-response multiagent)))))))
 
 (deftest session-event-response-mapping
@@ -2231,7 +2235,9 @@
     (is (= "thread_1" (:id m)))
     (is (= "sess_1" (:session-id m)))
     (is (= :idle (:status m)))
-    (is (= {:type :agent :id "agent_1" :version 2} (:agent m)))))
+    (is (= {:type :agent :id "agent_1" :version 2
+            :execution-identity {:type :service-account}}
+           (:agent m)))))
 
 (deftest session-thread-advisor-agent-mapping
   ;; A thread's agent slot is a union: an agent reference or an advisor.
@@ -2289,6 +2295,7 @@
             :name "researcher"
             :model "claude-opus-5-5"
             :system "research carefully"
+            :execution-identity {:type :service-account}
             :description "delegated helper"
             :mcp-servers []
             :skills []
@@ -3264,3 +3271,88 @@
                   :content-type "application/json" :status-code 200}]
     (is (= expected (get-in m [:mcp-probe :http-response])))
     (is (= expected (get-in m [:refresh :http-response])))))
+
+(deftest webhook-user-profile-enforcement-action-events-convert
+  (doseq [[type wire data-class wrap]
+          [[:user-profile-enforcement-action-opened "user_profile.enforcement_action_opened"
+            com.anthropic.models.beta.webhooks.BetaWebhookUserProfileEnforcementActionOpenedEventData
+            #(BetaWebhookEventData/ofUserProfileEnforcementActionOpened %)]
+           [:user-profile-enforcement-action-resolved "user_profile.enforcement_action_resolved"
+            com.anthropic.models.beta.webhooks.BetaWebhookUserProfileEnforcementActionResolvedEventData
+            #(BetaWebhookEventData/ofUserProfileEnforcementActionResolved %)]]]
+    (let [builder (clojure.lang.Reflector/invokeStaticMethod data-class "builder" (object-array 0))
+          data (-> builder
+                   (doto (.id "uprof_1") (.enforcementActionId "enf_1")
+                     (.organizationId "org_1") (.type (JsonValue/from wire)))
+                   (.build))
+          event (-> (UnwrapWebhookEvent/builder)
+                    (.id "evt_enf")
+                    (.createdAt (java.time.OffsetDateTime/parse "2026-10-05T00:00:00Z"))
+                    (.data ^BetaWebhookEventData (wrap data))
+                    (.type (JsonValue/from "event"))
+                    (.build))]
+      (is (= {:type type :data-id "uprof_1" :organization-id "org_1"
+              :enforcement-action-id "enf_1"
+              :id "evt_enf" :created-at "2026-10-05T00:00Z" :event-type "event"}
+             (webhook-event->map event))))))
+
+(deftest webhook-generic-variants-convert
+  ;; Regression: the shared mapper used to cast every generic variant to the
+  ;; session-created data class and threw ClassCastException.
+  (doseq [[type data-class wrap]
+          [[:session-pending com.anthropic.models.beta.webhooks.BetaWebhookSessionPendingEventData
+            #(BetaWebhookEventData/ofSessionPending %)]
+           [:vault-created com.anthropic.models.beta.webhooks.BetaWebhookVaultCreatedEventData
+            #(BetaWebhookEventData/ofVaultCreated %)]]]
+    (let [builder (clojure.lang.Reflector/invokeStaticMethod data-class "builder" (object-array 0))
+          data (-> builder
+                   (doto (.id "obj_1") (.organizationId "org_1") (.workspaceId "ws_1")
+                     (.type (JsonValue/from "x")))
+                   (.build))
+          event (-> (UnwrapWebhookEvent/builder)
+                    (.id "evt_generic")
+                    (.createdAt (java.time.OffsetDateTime/parse "2026-10-05T00:00:00Z"))
+                    (.data ^BetaWebhookEventData (wrap data))
+                    (.type (JsonValue/from "event"))
+                    (.build))]
+      (is (= {:type type :data-id "obj_1" :organization-id "org_1" :workspace-id "ws_1"}
+             (select-keys (webhook-event->map event)
+                          [:type :data-id :organization-id :workspace-id]))))))
+
+(deftest agent-execution-identity-builds-params
+  (let [^AgentCreateParams created
+        (->agent-create-params {:name "ops" :model "claude-opus-5-5"
+                                :execution-identity {:type :aws-role
+                                                     :role-arn "arn:aws:iam::123456789012:role/agent"}})
+        ^AgentUpdateParams updated
+        (->agent-update-params "agent_1" {:execution-identity {:type :service-account}})
+        create-identity (.get (.executionIdentity created))
+        update-identity (.get (.executionIdentity updated))]
+    (is (.isAwsRole create-identity))
+    (is (= "arn:aws:iam::123456789012:role/agent" (.roleArn (.asAwsRole create-identity))))
+    (is (.isServiceAccount update-identity))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"execution-identity"
+                          (->agent-create-params {:name "ops" :model "claude-opus-5-5"
+                                                  :execution-identity {:type :gcp}})))))
+
+(deftest agent-execution-identity-round-trips
+  (let [aws-role (com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentity/ofAwsRole
+                  "arn:aws:iam::123456789012:role/agent")
+        agent (-> ^BetaManagedAgentsAgent (agent-response (java.util.Optional/empty))
+                  (.toBuilder) (.executionIdentity aws-role) (.build))]
+    (is (= {:type :aws-role :role-arn "arn:aws:iam::123456789012:role/agent"}
+           (:execution-identity (agent->map agent))))
+    (is (= {:type :service-account}
+           (:execution-identity (session-agent->map (session-agent-response (java.util.Optional/empty))))))
+    (is (= {:type :service-account}
+           (:execution-identity (agent-ref->map (session-thread-agent "agent_9" 3)))))
+    (is (= {:type :aws-role :role-arn "arn:aws:iam::123456789012:role/agent"}
+           (:execution-identity
+            (#'beta/inline-agent->map
+             (-> (com.anthropic.core.ObjectMappers/jsonMapper)
+                 (.convertValue {"name" "inline helper"
+                                 "model" {"id" "claude-opus-5-5"}
+                                 "mcp_servers" [] "skills" [] "tools" []
+                                 "execution_identity" {"type" "aws_role"
+                                                       "role_arn" "arn:aws:iam::123456789012:role/agent"}}
+                                com.anthropic.models.beta.sessions.threads.BetaManagedAgentsInlineAgent))))))))

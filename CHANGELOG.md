@@ -5,6 +5,58 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-25
+
+### Added
+
+- Wrap the GA user profiles service in `anthropic.core`: `create-user-profile`,
+  `get-user-profile`, `list-user-profiles` (with `:enforcement-status`),
+  `update-user-profile`, `delete-user-profile`, and
+  `create-user-profile-action-url`. Profile maps include `:enforcement-status`,
+  `:enforcement-actions`, and `:programs`. No beta header is sent.
+- Add beta `delete-user-profile` and `create-user-profile-action-url` to
+  `anthropic.beta`.
+- Wrap Claude Tag administration in `anthropic.organization`: bundles, bundle
+  targets, Slack channels, and Slack workspaces.
+- Wrap telemetry destinations (including `test-telemetry-destination` and
+  destination workspaces) and organization webhook endpoints (including
+  `regenerate-webhook-signing-secret`).
+- Add `list-analytics-usage` and `list-analytics-cost`.
+- Add `update-workspace-rate-limit` and the beta twin
+  `update-beta-workspace-rate-limit`.
+- Add message threads: `:thread` on beta create, streaming, and batch requests,
+  plus the `create-beta-thread` helper with `thread-send`,
+  `thread-send-streaming`, `thread-append`, `thread-update`, `thread-fork`,
+  `thread-messages`, `thread-last-message`, `thread-previous-message-id`, and
+  `thread-tool-runner`.
+- Accept and return Managed Agents `:execution-identity` (AWS role or service
+  account) on agents, session agents, inline agents, and thread agents.
+- Accept `:speed` on stable `create-message`, `count-tokens`, and batch
+  requests; usage maps report `:speed`.
+- Accept `:follow-redirects` in per-request opts.
+- `list-spend-limits` accepts `:workspace-id` and the `:usage-tier` scope type.
+- Beta Organization request maps accept nested maps and `type`-tagged unions
+  where the SDK expects a request object.
+- Beta model capabilities include `:between-tools` thinking support.
+
+### Fixed
+
+- `list-workspace-rate-limits` threw `ClassCastException` on any rate limit
+  with a group, and on limits with a `source`. Both convert again.
+- `unwrap-webhook` threw `ClassCastException` on every event except the
+  dedicated session, deployment, environment, and memory-store variants. Generic
+  events and user-profile enforcement-action events convert again.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.3.0**. The SDK
+  now models message params as user/assistant/system unions; the Clojure
+  `:messages` shape is unchanged.
+- With anthropic-java 3.x, requests use API version `2026-10-21`, send `:api-key`
+  as `Authorization: Bearer <key>` instead of `x-api-key`, and beta routes no
+  longer carry `?beta=true`. Proxies or gateways that match on the old header or
+  query need updating.
+
 ## [0.43.0] - 2026-10-09
 
 ### Added

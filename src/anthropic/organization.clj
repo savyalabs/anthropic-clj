@@ -20,7 +20,7 @@
   (:require [anthropic.core]
             [clojure.string :as str])
   (:import (com.anthropic.client AnthropicClient)
-           (com.anthropic.core JsonValue)
+           (com.anthropic.core JsonValue ObjectMappers)
            (com.anthropic.errors AnthropicException)
            (com.anthropic.models.organization.compliancesettings
                                              OrganizationComplianceSettings
@@ -186,6 +186,26 @@
               known)
         (dynamic-static-call target "of" (->wire value)))))
 
+(defn- ->sdk-json-data
+  "Clojure request data -> the SDK's JSON shape. Keyword keys and values become
+  lower_snake wire strings; string keys (header names, metadata keys) and
+  string values are kept verbatim."
+  [value]
+  (cond
+    (map? value) (into {}
+                       (map (fn [[k v]] [(if (keyword? k) (->wire k) (str k))
+                                         (->sdk-json-data v)]))
+                       value)
+    (sequential? value) (mapv ->sdk-json-data value)
+    (keyword? value) (->wire value)
+    :else value))
+
+(defn- ->sdk-object
+  "Build a nested SDK model (including `type`-discriminated unions) from a
+  Clojure map through the SDK's own JSON deserializers."
+  [^Class target value]
+  (.convertValue (ObjectMappers/jsonMapper) (->sdk-json-data value) target))
+
 (defn- dynamic-value [^Class target generic-type value]
   (cond
     (nil? value) nil
@@ -210,25 +230,45 @@
     (or (keyword? value) (string? value))
     (try (dynamic-static-call target "of" (if (keyword? value) (->wire value) value))
          (catch Throwable _ value))
+    (and (map? value) (.startsWith (.getName target) "com.anthropic.models."))
+    (->sdk-object target value)
     :else value))
 
 (def ^:private wrapper-param-types
   #{java.util.Optional com.anthropic.core.JsonField JsonValue com.anthropic.core.MultipartField})
+
+(defn- declared-field-type
+  "The type that the built object's `method-name` accessor declares, unwrapped
+  from Optional, or nil when there is no such accessor."
+  ^Class [builder method-name]
+  (let [built (.getReturnType (.getMethod (class builder) "build" (make-array Class 0)))
+        getter (try (.getMethod built method-name (make-array Class 0))
+                    (catch NoSuchMethodException _ nil))]
+    (when getter
+      (let [t (.getGenericReturnType ^java.lang.reflect.Method getter)]
+        (if (and (instance? java.lang.reflect.ParameterizedType t)
+                 (= java.util.Optional (.getRawType ^java.lang.reflect.ParameterizedType t)))
+          (type-class (first (.getActualTypeArguments ^java.lang.reflect.ParameterizedType t)))
+          (type-class t))))))
 
 (defn- builder-setter
   "Pick the builder overload for `method-name` that should receive `value`.
   Optional overloads are never used. Plain-typed overloads beat the raw
   JsonField/JsonValue/MultipartField ones (which would otherwise receive an
   unconverted or wire-mangled value), and among plain overloads one that
-  already accepts `value` as-is (e.g. InputStream vs byte[] vs Path) wins."
+  already accepts `value` as-is (e.g. InputStream vs byte[] vs Path) wins,
+  then the one taking the field's declared type (a union rather than one of
+  its variant shortcuts)."
   ^java.lang.reflect.Method [builder method-name value]
   (let [param-type (fn [^java.lang.reflect.Method m] (aget (.getParameterTypes m) 0))
         candidates (filter #(and (= method-name (.getName ^java.lang.reflect.Method %))
                                  (= 1 (alength (.getParameterTypes ^java.lang.reflect.Method %)))
                                  (not= java.util.Optional (param-type %)))
                            (.getMethods (class builder)))
-        plain (remove #(contains? wrapper-param-types (param-type %)) candidates)]
+        plain (remove #(contains? wrapper-param-types (param-type %)) candidates)
+        declared (when (next plain) (declared-field-type builder method-name))]
     (or (first (filter #(instance? (param-type %) value) plain))
+        (first (filter #(= declared (param-type %)) plain))
         (first plain)
         (first candidates))))
 
@@ -886,18 +926,27 @@
                     (.remove (.build b)))))))
 
 
+(defn- ->workspace-rate-limit-group
+  "Convert WorkspaceRateLimit$Group union to Clojure map."
+  [^com.anthropic.models.organization.workspaces.ratelimits.WorkspaceRateLimit$Group group]
+  (when group
+    (let [group-type (kw<- (.asString (.type group)))]
+      (cond-> {:id (.id group) :type (name group-type)}
+        (.isModel group)
+        (assoc :display-name (.displayName ^com.anthropic.models.organization.ratelimits.OrganizationRateLimitModelGroup (.asModel group)))))))
+
 (defn- workspace-rate-limit->map
   [^com.anthropic.models.organization.workspaces.ratelimits.WorkspaceRateLimit r]
   (cond-> {:rate-limit-id (.rateLimitId r)
            :workspace-id (.workspaceId r)
-           :group (->rate-limit-group (.group r))
+           :group (->workspace-rate-limit-group (.group r))
            :limits (mapv (fn [^com.anthropic.models.organization.workspaces.ratelimits.WorkspaceRateLimitValue limit]
                            (cond-> {:type (.type limit)
                                     :value (.value limit)}
                              (some? (unopt (.orgLimit limit)))
                              (assoc :org-limit (unopt (.orgLimit limit)))
-                             (some? (unopt (.source limit)))
-                             (assoc :source (obj->clj (unopt (.source limit))))))
+                             (some? (unopt (.asKnown (._source limit))))
+                             (assoc :source (obj->clj (unopt (.asKnown (._source limit)))))))
                         (.limits r))}
     (some? (unopt (.models r)))
     (assoc :models (vec (unopt (.models r))))))
@@ -926,6 +975,19 @@
      (let [params (->workspace-rate-limit-list-params workspace-id opts)]
        (mapv workspace-rate-limit->map (.autoPager (-> (.organization client) (.workspaces) (.rateLimits)
                                       (.list params))))))))
+
+(defn update-workspace-rate-limit
+  "Update a workspace rate limit. Requires `:limits`, a seq of
+  `{:type :requests-per-minute :value 100}` maps; a nil `:value` clears that
+  override. Returns the updated rate limit map."
+  [^AnthropicClient client ^String workspace-id ^String rate-limit-id {:keys [limits] :as changes}]
+  (when-not (seq limits) (missing-key! :limits))
+  (with-api-errors
+    (let [^com.anthropic.models.organization.workspaces.ratelimits.RateLimitUpdateParams params
+          (->dynamic-params "com.anthropic.models.organization.workspaces.ratelimits.RateLimitUpdateParams"
+                            (assoc changes :workspace-id workspace-id :rate-limit-id rate-limit-id))]
+      (workspace-rate-limit->map (-> (.organization client) (.workspaces) (.rateLimits)
+                                     (.update params))))))
 
 ;; ---- Workspace service accounts -------------------------------------------
 
@@ -1285,12 +1347,35 @@
   (with-api-errors (analytics-list client ["costReport"] "com.anthropic.models.beta.organization.analytics.costreport.CostReportListParams" opts)))
 (defn list-analytics-user-cost-report [client opts]
   (with-api-errors (analytics-list client ["userCostReport"] "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListParams" opts)))
+(defn list-analytics-usage
+  "List token-usage analytics buckets. Requires `:starting-at` (an ISO-8601
+  instant). Options include `:ending-at`, `:time-bucket-width` (`:minute`/
+  `:hour`/`:day`, sent as `1m`/`1h`/`1d`), `:group-by` (e.g. `[:model :workspace-id]`), actor and id
+  filters (`:actor-types`, `:actor-ids`, `:api-key-ids`, `:workspace-ids`,
+  `:models`, `:products`, `:service-tiers`, `:speeds`, ...),
+  `:exclude-deleted-users`, `:order`, `:order-by`, `:limit`, and `:page`."
+  [client opts]
+  (when-not (:starting-at opts) (missing-key! :starting-at))
+  (with-api-errors (analytics-list client ["usage"] "com.anthropic.models.beta.organization.analytics.usage.UsageListParams" opts)))
+(defn list-analytics-cost
+  "List cost analytics buckets. Takes the same options as
+  `list-analytics-usage`; `:group-by` also accepts `:cost-type` and
+  `:token-type`, and `:order-by` is `:amount`, `:list-amount`, or `:time`."
+  [client opts]
+  (when-not (:starting-at opts) (missing-key! :starting-at))
+  (with-api-errors (analytics-list client ["cost"] "com.anthropic.models.beta.organization.analytics.cost.CostListParams" opts)))
 
+(defn- admin-service
+  "The beta organization service at `service`: one accessor name, or a path
+  of accessor names for nested services."
+  [client service]
+  (reduce dynamic-call (beta-organization client)
+          (if (string? service) [service] service)))
 (defn- admin-call [client service method params opts]
-  (obj->clj (dynamic-call (dynamic-call (beta-organization client) service)
+  (obj->clj (dynamic-call (admin-service client service)
                           method (->dynamic-params params opts))))
 (defn- admin-list [client service params opts]
-  (dynamic-list (dynamic-call (beta-organization client) service)
+  (dynamic-list (admin-service client service)
                 (->dynamic-params params (or opts {}))))
 
 (defn get-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "retrieve" "com.anthropic.models.beta.organization.spendlimits.SpendLimitRetrieveParams" {:spend-limit-id id})))
@@ -1330,3 +1415,174 @@
 (defn list-plugin-marketplaces ([client] (list-plugin-marketplaces client {})) ([client opts] (with-api-errors (admin-list client "pluginMarketplaces" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceListParams" opts))))
 (defn validate-plugin-marketplace-archive [client archive] (with-api-errors (admin-call client "pluginMarketplaces" "validateArchive" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceValidateArchiveParams" {:archive archive})))
 (defn validate-plugin-marketplace-repository [client repository-url opts] (with-api-errors (admin-call client "pluginMarketplaces" "validateRepository" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceValidateRepositoryParams" (assoc (or opts {}) :repository-url repository-url))))
+;; ---- Claude Tag ------------------------------------------------------------
+;; Settings maps (`:enabled`, `:model`, `:instructions`, `:environment-id`,
+;; `:guest-policy {:type :allow|:restrict|:channel-only}`) and Slack
+;; identifier maps are converted into the SDK's nested request objects.
+
+(def ^:private claude-tag-params "com.anthropic.models.beta.organization.claudetag.")
+
+(defn list-claude-tag-bundles
+  "List Claude Tag bundles. Options: `:limit`, `:page`, `:betas`."
+  ([client] (list-claude-tag-bundles client {}))
+  ([client opts] (with-api-errors (admin-list client ["claudeTag" "bundles"] (str claude-tag-params "bundles.BundleListParams") opts))))
+(defn get-claude-tag-bundle
+  "Retrieve one Claude Tag bundle by id."
+  [client bundle-id]
+  (with-api-errors (admin-call client ["claudeTag" "bundles"] "retrieve" (str claude-tag-params "bundles.BundleRetrieveParams") {:bundle-id bundle-id})))
+
+(defn create-claude-tag-bundle-target
+  "Attach a target to a Claude Tag bundle. Requires `:target`, a map such as
+  `{:type :slack-channel :slack-channel-id \"C123\"}` or
+  `{:type :slack-workspace :slack-workspace-id \"T456\"}`."
+  [client bundle-id req]
+  (when-not (:target req) (missing-key! :target))
+  (with-api-errors (admin-call client ["claudeTag" "bundles" "targets"] "create" (str claude-tag-params "bundles.targets.TargetCreateParams") (assoc req :bundle-id bundle-id))))
+(defn get-claude-tag-bundle-target
+  "Retrieve one target of a Claude Tag bundle."
+  [client bundle-id target-id]
+  (with-api-errors (admin-call client ["claudeTag" "bundles" "targets"] "retrieve" (str claude-tag-params "bundles.targets.TargetRetrieveParams") {:bundle-id bundle-id :target-id target-id})))
+(defn list-claude-tag-bundle-targets
+  "List the targets of a Claude Tag bundle. Options: `:limit`, `:page`, `:betas`."
+  ([client bundle-id] (list-claude-tag-bundle-targets client bundle-id {}))
+  ([client bundle-id opts] (with-api-errors (admin-list client ["claudeTag" "bundles" "targets"] (str claude-tag-params "bundles.targets.TargetListParams") (assoc opts :bundle-id bundle-id)))))
+(defn delete-claude-tag-bundle-target
+  "Detach a target from a Claude Tag bundle. Returns the delete response as a map."
+  [client bundle-id target-id]
+  (with-api-errors (admin-call client ["claudeTag" "bundles" "targets"] "delete" (str claude-tag-params "bundles.targets.TargetDeleteParams") {:bundle-id bundle-id :target-id target-id})))
+
+(defn create-claude-tag-slack-channel
+  "Configure Claude Tag for a Slack channel. Requires `:slack`
+  (`{:channel-id ... :workspace-id ...}`); optional `:settings`."
+  [client req]
+  (when-not (:slack req) (missing-key! :slack))
+  (with-api-errors (admin-call client ["claudeTag" "slackChannels"] "create" (str claude-tag-params "slackchannels.SlackChannelCreateParams") req)))
+(defn get-claude-tag-slack-channel
+  "Retrieve a Claude Tag Slack channel. Options: `:include-inherited`."
+  ([client id] (get-claude-tag-slack-channel client id {}))
+  ([client id opts] (with-api-errors (admin-call client ["claudeTag" "slackChannels"] "retrieve" (str claude-tag-params "slackchannels.SlackChannelRetrieveParams") (assoc opts :id id)))))
+(defn list-claude-tag-slack-channels
+  "List Claude Tag Slack channels. Requires `:slack-workspace-id`. Options:
+  `:slack-channel-id`, `:include-inherited`, `:limit`, `:page`, `:betas`."
+  [client opts]
+  (when-not (:slack-workspace-id opts) (missing-key! :slack-workspace-id))
+  (with-api-errors (admin-list client ["claudeTag" "slackChannels"] (str claude-tag-params "slackchannels.SlackChannelListParams") opts)))
+(defn update-claude-tag-slack-channel
+  "Update a Claude Tag Slack channel's `:settings`."
+  [client id changes]
+  (with-api-errors (admin-call client ["claudeTag" "slackChannels"] "update" (str claude-tag-params "slackchannels.SlackChannelUpdateParams") (assoc changes :id id))))
+(defn delete-claude-tag-slack-channel
+  "Remove a Claude Tag Slack channel configuration. Returns the delete response as a map."
+  [client id]
+  (with-api-errors (admin-call client ["claudeTag" "slackChannels"] "delete" (str claude-tag-params "slackchannels.SlackChannelDeleteParams") {:id id})))
+
+(defn list-claude-tag-slack-workspaces
+  "List Claude Tag Slack workspaces. Options: `:slack-workspace-id`,
+  `:include-inherited`, `:limit`, `:page`, `:betas`."
+  ([client] (list-claude-tag-slack-workspaces client {}))
+  ([client opts] (with-api-errors (admin-list client ["claudeTag" "slackWorkspaces"] (str claude-tag-params "slackworkspaces.SlackWorkspaceListParams") opts))))
+(defn get-claude-tag-slack-workspace
+  "Retrieve a Claude Tag Slack workspace. Options: `:include-inherited`."
+  ([client id] (get-claude-tag-slack-workspace client id {}))
+  ([client id opts] (with-api-errors (admin-call client ["claudeTag" "slackWorkspaces"] "retrieve" (str claude-tag-params "slackworkspaces.SlackWorkspaceRetrieveParams") (assoc opts :id id)))))
+(defn update-claude-tag-slack-workspace
+  "Update a Claude Tag Slack workspace's `:settings`."
+  [client id changes]
+  (with-api-errors (admin-call client ["claudeTag" "slackWorkspaces"] "update" (str claude-tag-params "slackworkspaces.SlackWorkspaceUpdateParams") (assoc changes :id id))))
+
+;; ---- Telemetry destinations ------------------------------------------------
+;; `:workspaces` is `{:type :all}`, `{:type :include :workspace-ids [...]}` or
+;; `{:type :exclude :workspace-ids [...]}`; `:state` is `{:type :enabled}` or
+;; `{:type :disabled}`; `:traces` takes `:enabled`, `:endpoint-url`,
+;; `:content-mode` and `:max-content-bytes`. `:headers` is a map of header
+;; name strings to values, sent verbatim.
+
+(def ^:private telemetry-params "com.anthropic.models.beta.organization.telemetrydestinations.")
+
+(defn create-telemetry-destination
+  "Create an OpenTelemetry destination. Requires `:endpoint-url` and
+  `:workspaces`; optional `:display-name`, `:headers`, `:traces`, `:betas`."
+  [client req]
+  (when-not (:endpoint-url req) (missing-key! :endpoint-url))
+  (when-not (:workspaces req) (missing-key! :workspaces))
+  (with-api-errors (admin-call client "telemetryDestinations" "create" (str telemetry-params "TelemetryDestinationCreateParams") req)))
+(defn get-telemetry-destination
+  "Retrieve one telemetry destination by id."
+  [client destination-id]
+  (with-api-errors (admin-call client "telemetryDestinations" "retrieve" (str telemetry-params "TelemetryDestinationRetrieveParams") {:destination-id destination-id})))
+(defn list-telemetry-destinations
+  "List telemetry destinations. Options: `:workspace-ids`, `:limit`, `:page`, `:betas`."
+  ([client] (list-telemetry-destinations client {}))
+  ([client opts] (with-api-errors (admin-list client "telemetryDestinations" (str telemetry-params "TelemetryDestinationListParams") opts))))
+(defn update-telemetry-destination
+  "Update a telemetry destination's `:display-name`, `:endpoint-url`,
+  `:headers`, `:state`, `:traces`, or `:workspaces`."
+  [client destination-id changes]
+  (with-api-errors (admin-call client "telemetryDestinations" "update" (str telemetry-params "TelemetryDestinationUpdateParams") (assoc changes :destination-id destination-id))))
+(defn delete-telemetry-destination
+  "Delete a telemetry destination. Returns the delete response as a map."
+  [client destination-id]
+  (with-api-errors (admin-call client "telemetryDestinations" "delete" (str telemetry-params "TelemetryDestinationDeleteParams") {:destination-id destination-id})))
+(defn test-telemetry-destination
+  "Send a test export to a telemetry destination. Returns `{:result {:type
+  :success}}` or a `:failure` result with its reason."
+  [client destination-id]
+  (with-api-errors (admin-call client "telemetryDestinations" "test" (str telemetry-params "TelemetryDestinationTestParams") {:destination-id destination-id})))
+
+(defn add-telemetry-destination-workspace
+  "Add a workspace to a telemetry destination's workspace list."
+  [client destination-id workspace-id]
+  (with-api-errors (admin-call client ["telemetryDestinations" "workspaces"] "add" (str telemetry-params "workspaces.WorkspaceAddParams") {:destination-id destination-id :workspace-id workspace-id})))
+(defn list-telemetry-destination-workspaces
+  "List the workspaces of a telemetry destination. Options: `:limit`, `:page`, `:betas`."
+  ([client destination-id] (list-telemetry-destination-workspaces client destination-id {}))
+  ([client destination-id opts] (with-api-errors (admin-list client ["telemetryDestinations" "workspaces"] (str telemetry-params "workspaces.WorkspaceListParams") (assoc opts :destination-id destination-id)))))
+(defn remove-telemetry-destination-workspace
+  "Remove a workspace from a telemetry destination's workspace list."
+  [client destination-id workspace-id]
+  (with-api-errors (admin-call client ["telemetryDestinations" "workspaces"] "remove" (str telemetry-params "workspaces.WorkspaceRemoveParams") {:destination-id destination-id :workspace-id workspace-id})))
+
+;; ---- Organization webhook endpoints ---------------------------------------
+
+(def ^:private webhook-params "com.anthropic.models.beta.organization.webhooks.")
+
+(defn create-webhook-endpoint
+  "Create an organization webhook endpoint. Requires `:url` and
+  `:enabled-events` (keywords such as `:user-profile-enforcement-action-opened`);
+  optional `:name`, `:description`, `:betas`. The returned map carries the
+  `:signing-secret`, which is only shown once."
+  [client req]
+  (when-not (:url req) (missing-key! :url))
+  (when-not (seq (:enabled-events req)) (missing-key! :enabled-events))
+  (with-api-errors (admin-call client "webhooks" "create" (str webhook-params "WebhookCreateParams") req)))
+(defn get-webhook-endpoint
+  "Retrieve one organization webhook endpoint by id."
+  [client webhook-endpoint-id]
+  (with-api-errors (admin-call client "webhooks" "retrieve" (str webhook-params "WebhookRetrieveParams") {:webhook-endpoint-id webhook-endpoint-id})))
+(defn list-webhook-endpoints
+  "List organization webhook endpoints. Options: `:limit`, `:after-id`,
+  `:before-id`, `:order` (`:asc`/`:desc`), `:betas`."
+  ([client] (list-webhook-endpoints client {}))
+  ([client opts] (with-api-errors (admin-list client "webhooks" (str webhook-params "WebhookListParams") opts))))
+(defn update-webhook-endpoint
+  "Update a webhook endpoint's `:url`, `:name`, `:description`,
+  `:enabled-events`, or `:state` (`:enabled`/`:disabled`)."
+  [client webhook-endpoint-id changes]
+  (with-api-errors (admin-call client "webhooks" "update" (str webhook-params "WebhookUpdateParams") (assoc changes :webhook-endpoint-id webhook-endpoint-id))))
+(defn delete-webhook-endpoint
+  "Delete an organization webhook endpoint. Returns the delete response as a map."
+  [client webhook-endpoint-id]
+  (with-api-errors (admin-call client "webhooks" "delete" (str webhook-params "WebhookDeleteParams") {:webhook-endpoint-id webhook-endpoint-id})))
+(defn regenerate-webhook-signing-secret
+  "Rotate a webhook endpoint's signing secret. Returns `{:signing-secret ...}`."
+  [client webhook-endpoint-id]
+  (with-api-errors (admin-call client "webhooks" "regenerateSigningSecret" (str webhook-params "WebhookRegenerateSigningSecretParams") {:webhook-endpoint-id webhook-endpoint-id})))
+
+;; ---- Beta workspace rate limits --------------------------------------------
+
+(defn update-beta-workspace-rate-limit
+  "Update a workspace rate limit through the beta organization API. Takes the
+  same `:limits` as `update-workspace-rate-limit`."
+  [client workspace-id rate-limit-id {:keys [limits] :as changes}]
+  (when-not (seq limits) (missing-key! :limits))
+  (with-api-errors (admin-call client ["workspaces" "rateLimits"] "update" "com.anthropic.models.beta.organization.workspaces.ratelimits.RateLimitUpdateParams" (assoc changes :workspace-id workspace-id :rate-limit-id rate-limit-id))))

@@ -390,11 +390,9 @@
       (.isPresent mit) (assoc :max-input-tokens (.get mit))
       (.isPresent mt) (assoc :max-tokens (.get mt))
       (.isPresent caps) (assoc :capabilities
-                               (update-in
-                                (normalize-model-data
-                                 (json->clj (JsonValue/from ^com.anthropic.models.beta.models.BetaModelCapabilities
-                                                            (.get caps))))
-                                [:thinking :types] dissoc :between-tools)))))
+                               (normalize-model-data
+                                (json->clj (JsonValue/from ^com.anthropic.models.beta.models.BetaModelCapabilities
+                                                           (.get caps))))))))
 
 (defn list-beta-models
   "List beta models as maps, newest first. Optional `opts` accepts `:limit`,
@@ -1610,9 +1608,26 @@
                             (fn [s#] (com.anthropic.models.beta.agents.BetaManagedAgentsModelConfigParams$Speed/of s#)) :speed)))
     (.build b)))
 
+(defn- ->execution-identity
+  ^com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentityParams
+  [{:keys [type role-arn]}]
+  (case (->enum-value type #{:aws-role :service-account} keyword :execution-identity)
+    :aws-role (do (when-not role-arn (missing-key! :role-arn))
+                  (com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentityParams/ofAwsRole
+                   ^String role-arn))
+    :service-account
+    (com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentityParams/ofServiceAccount
+     (.build (com.anthropic.models.beta.agents.BetaManagedAgentsServiceAccountExecutionIdentityParams/builder)))))
+
+(defn- execution-identity->map
+  [^com.anthropic.models.beta.agents.BetaManagedAgentsExecutionIdentity e]
+  (if (.isAwsRole e)
+    {:type :aws-role :role-arn (.roleArn (.asAwsRole e))}
+    {:type :service-account}))
+
 (defn- ->agent-create-params ^AgentCreateParams
   [{:keys [name model effort inference-geo speed system description metadata skills mcp-servers
-           tools multiagent betas]}]
+           tools multiagent execution-identity betas]}]
   (when-not name (missing-key! :name))
   (when-not model (missing-key! :model))
   (let [b (AgentCreateParams/builder)]
@@ -1627,6 +1642,7 @@
     (doseq [server mcp-servers] (.addMcpServer b (->mcp-server server)))
     (doseq [tool tools] (.addTool b (->agent-create-tool tool)))
     (when multiagent (.multiagent b (->agent-multiagent multiagent)))
+    (when execution-identity (.executionIdentity b (->execution-identity execution-identity)))
     (doseq [beta betas]
       (let [^String beta-name (if (keyword? beta) (clojure.core/name beta) beta)]
         (.addBeta b beta-name)))
@@ -1634,7 +1650,7 @@
 
 (defn- ->agent-update-params ^AgentUpdateParams
   [agent-id {:keys [version name model effort inference-geo speed system description metadata
-                    skills mcp-servers tools multiagent betas]}]
+                    skills mcp-servers tools multiagent execution-identity betas]}]
   (let [b (AgentUpdateParams/builder)]
     (.agentId b ^String agent-id)
     (when version (.version b (int version)))
@@ -1650,6 +1666,7 @@
     (doseq [server mcp-servers] (.addMcpServer b (->mcp-server server)))
     (doseq [tool tools] (.addTool b (->agent-update-tool tool)))
     (when multiagent (.multiagent b (->agent-multiagent multiagent)))
+    (when execution-identity (.executionIdentity b (->execution-identity execution-identity)))
     (doseq [beta betas]
       (let [^String beta-name (if (keyword? beta) (clojure.core/name beta) beta)]
         (.addBeta b beta-name)))
@@ -1937,7 +1954,9 @@
     (seq (.skills r)) (assoc :skills (mapv agent-skill->map (.skills r)))
     (seq (.mcpServers r)) (assoc :mcp-servers (mapv mcp-server->map (.mcpServers r)))
     (seq (.tools r)) (assoc :tools (mapv agent-tool->map (.tools r)))
-    (unopt (.multiagent r)) (assoc :multiagent (multiagent->map (unopt (.multiagent r))))))
+    (unopt (.multiagent r)) (assoc :multiagent (multiagent->map (unopt (.multiagent r))))
+    (unopt (.asKnown (._executionIdentity r)))
+    (assoc :execution-identity (execution-identity->map (unopt (.asKnown (._executionIdentity r)))))))
 
 (defn create-agent
   "Create a managed agent: `:name` and `:model` (required), `:system`,
@@ -2121,7 +2140,9 @@
                                                             :predefined-agents (mapv agent-ref->map (.predefinedAgents enabled))
                                                             :inline-agents (multiagent-inline-agents->map (.inlineAgents enabled))})
                                                          {:enabled false}))})
-                                       :else {:type :unknown})))))
+                                       :else {:type :unknown})))
+    (unopt (.asKnown (._executionIdentity r)))
+    (assoc :execution-identity (execution-identity->map (unopt (.asKnown (._executionIdentity r)))))))
 
 (defn- outcome-evaluation->map [^com.anthropic.models.beta.sessions.BetaManagedAgentsOutcomeEvaluationResource r]
   (cond-> {:type (json-type->keyword r)
@@ -2174,7 +2195,9 @@
                             :else {:type :unknown}))
                         (.tools r))}
     (unopt (.description r)) (assoc :description (unopt (.description r)))
-    (unopt (.system r)) (assoc :system (unopt (.system r)))))
+    (unopt (.system r)) (assoc :system (unopt (.system r)))
+    (unopt (.asKnown (._executionIdentity r)))
+    (assoc :execution-identity (execution-identity->map (unopt (.asKnown (._executionIdentity r)))))))
 
 (defn- agent-ref->map
   "An agent slot is a union of an agent reference and an advisor. The union
@@ -2203,7 +2226,10 @@
 
     :else
     (let [^BetaManagedAgentsSessionThreadAgent r r]
-      {:type :agent :id (.id r) :version (.version r)})))
+      (cond-> {:type :agent :id (.id r) :version (.version r)}
+        (unopt (.asKnown (._executionIdentity r)))
+        (assoc :execution-identity
+               (execution-identity->map (unopt (.asKnown (._executionIdentity r)))))))))
 
 (defn create-session
   "Create a session for `:agent` (an agent id, required), with optional
@@ -4353,6 +4379,39 @@
        (enrollment-url->map (-> (.beta client) (.userProfiles)
                                 (.createEnrollmentUrl params)))))))
 
+(defn delete-user-profile
+  "Delete a user profile. Optional `opts` accepts `:workspace-id` and
+  `:betas`. Returns `{:id ... :type :user-profile-deleted}`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (delete-user-profile client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id {:keys [workspace-id betas]}]
+   (with-api-errors
+     (let [b (com.anthropic.models.beta.userprofiles.UserProfileDeleteParams/builder)]
+       (.userProfileId b user-profile-id)
+       (when workspace-id (.workspaceId b ^String workspace-id))
+       (doseq [beta (->beta-names betas)] (.addBeta b ^String beta))
+       (let [r (-> (.beta client) (.userProfiles) (.delete (.build b)))]
+         {:id (.id r) :type (json-type->keyword r)})))))
+
+(defn create-user-profile-action-url
+  "Create a short-lived URL for a user profile action. `opts` accepts
+  `:action` (default and only value `:enroll-end-user`), `:workspace-id`, and
+  `:betas`. Returns `{:url ... :expires-at ... :type ...}`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (create-user-profile-action-url client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id {:keys [action workspace-id betas]}]
+   (->enum-value (or action :enroll-end-user) #{:enroll-end-user} identity :action)
+   (with-api-errors
+     (let [b (com.anthropic.models.beta.userprofiles.actionurls.ActionUrlCreateParams/builder)]
+       (.userProfileId b user-profile-id)
+       (.action b (.build (com.anthropic.models.beta.userprofiles.actionurls.BetaUserProfileEnrollEndUserAction/builder)))
+       (when workspace-id (.workspaceId b ^String workspace-id))
+       (doseq [beta (->beta-names betas)] (.addBeta b ^String beta))
+       (let [r (-> (.beta client) (.userProfiles) (.actionUrls) (.create (.build b)))]
+         {:url (.url r)
+          :expires-at (str (.expiresAt r))
+          :type (json-type->keyword r)})))))
+
 ;; ---- Webhooks --------------------------------------------------------------
 
 (defn- webhook-common->map [type data-id organization-id workspace-id]
@@ -4417,8 +4476,25 @@
   (webhook-common->map :memory-store-deleted (.id d) (.organizationId d) (.workspaceId d)))
 
 (defn- webhook-generic->map
-  [^BetaWebhookSessionCreatedEventData d type]
-  (webhook-common->map type (.id d) (.organizationId d) (.workspaceId d)))
+  "Map the many variants that share the id/organization/workspace shape. They
+  are distinct classes, so read the fields from the JSON form."
+  [d type]
+  (let [m (json->clj (JsonValue/from d))]
+    (webhook-common->map type (:id m) (:organization_id m) (:workspace_id m))))
+
+(defn- webhook-enforcement-action-opened->map
+  [^com.anthropic.models.beta.webhooks.BetaWebhookUserProfileEnforcementActionOpenedEventData d]
+  {:type :user-profile-enforcement-action-opened
+   :data-id (.id d)
+   :organization-id (.organizationId d)
+   :enforcement-action-id (.enforcementActionId d)})
+
+(defn- webhook-enforcement-action-resolved->map
+  [^com.anthropic.models.beta.webhooks.BetaWebhookUserProfileEnforcementActionResolvedEventData d]
+  {:type :user-profile-enforcement-action-resolved
+   :data-id (.id d)
+   :organization-id (.organizationId d)
+   :enforcement-action-id (.enforcementActionId d)})
 
 (defn- webhook-data->map [^BetaWebhookEventData d]
   (cond
@@ -4467,11 +4543,9 @@
     (.isAgentDeleted d) (webhook-generic->map (.asAgentDeleted d) :agent-deleted)
     (.isAgentUpdated d) (webhook-generic->map (.asAgentUpdated d) :agent-updated)
     (.isUserProfileEnforcementActionOpened d)
-    (webhook-generic->map (.asUserProfileEnforcementActionOpened d)
-                          :user-profile-enforcement-action-opened)
+    (webhook-enforcement-action-opened->map (.asUserProfileEnforcementActionOpened d))
     (.isUserProfileEnforcementActionResolved d)
-    (webhook-generic->map (.asUserProfileEnforcementActionResolved d)
-                          :user-profile-enforcement-action-resolved)
+    (webhook-enforcement-action-resolved->map (.asUserProfileEnforcementActionResolved d))
     :else {:type :unknown}))
 
 (defn- webhook-event->map [^UnwrapWebhookEvent r]

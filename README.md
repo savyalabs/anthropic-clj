@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.43.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.44.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.43.0"]
+[net.clojars.savya/anthropic-clj "0.44.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -55,7 +55,14 @@ Set `ANTHROPIC_API_KEY` in your environment, or pass client options:
 - `:configure` - receives the raw SDK builder last, for anything not wrapped
   here (interceptors, a custom `jsonMapper`, or a Bedrock/Vertex `backend`)
 
-Tracks [`com.anthropic/anthropic-java` 2.71.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v2.71.0) - see `CHANGELOG.md` for the bump history.
+OpenTelemetry tracing is reachable through `:configure`, for example
+`{:configure #(.openTelemetry % true)}` or `.openTelemetry` with an
+`OpenTelemetryOptions` object; `.backend` is reachable the same way. The
+`ClientOptions`-only `openTelemetryPlatform` and `openTelemetryProviderName`
+settings are reachable with the SDK's `(.withOptions client consumer)` on a
+built client. This library adds no OpenTelemetry dependency.
+
+Tracks [`com.anthropic/anthropic-java` 3.3.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.3.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -87,12 +94,18 @@ Tracks [`com.anthropic/anthropic-java` 2.71.0](https://github.com/anthropics/ant
 - `:service-tier` - `:auto`/`:standard-only`
 - `:container`, `:inference-geo`, `:user-profile-id`
 - `:cache-control` - top-level prompt-cache breakpoint
+- `:speed` - `:standard`/`:fast` (also on `count-tokens` and batch requests;
+  responses report `:usage :speed`)
 
 `create-message` and `count-tokens` accept a third `opts` map with `:timeout-ms`,
-`:response-validation`, and `:include-response`. `:include-response` adds the raw
+`:response-validation`, `:follow-redirects`, and `:include-response`. `:include-response` adds the raw
 HTTP `:status`, `:request-id`, and headers. Request maps accept `:extra-headers`,
 `:extra-query`, and `:extra-body`. Use these keys to send a parameter that this
 wrapper does not know about yet.
+
+anthropic-java 3.x models each message param as a user, assistant, or system
+union. The Clojure `:messages` shape is unchanged: keep passing
+`{:role :user|:assistant|:system :content ...}` maps.
 
 For structured output, pass `:response-format`, `:output-type`, `:effort`, or a
 combination. `:output-type` accepts a Java `Class` such as `String` and builds
@@ -400,6 +413,9 @@ through the `:configure` option if you need thousands of in-flight requests.
 - Message Batches: create, get, list, cancel, delete, results, reduce
 - Files (beta): upload, get, list, download, delete
 - Skills: create, get, list, delete (and skill versions)
+- User profiles: `create-user-profile`, `get-user-profile`, `list-user-profiles`,
+  `update-user-profile`, `delete-user-profile`, `create-user-profile-action-url`
+- Organization administration: `anthropic.organization`
 - Beta agents platform: `anthropic.beta`
 - Beta Messages API: `anthropic.beta.messages`
 
@@ -429,6 +445,32 @@ map shown above, including `:all`, `:none`, `:only`, `:except`, and
 Power users can use `beta-tool-runner-handle` for the SDK's blocking
 `BetaToolRunner`; its handle provides lazy `:messages` and `:streaming`
 sequences, `:set-next-params!`, and translated `:last-tool-response` access.
+
+Message threads keep conversation state on the server. Pass
+`:thread {:previous-message-id "msg_..."}` (or `{:type :create}`) to
+`create-beta-message`, the streaming fns, or a batch request. The thread
+helper does the bookkeeping for you:
+
+```clojure
+(require '[anthropic.beta.messages :as messages])
+
+(def t (messages/create-beta-thread client {:model "claude-opus-5-5"
+                                            :max-tokens 1024
+                                            :messages [{:role :user :content "hi"}]}))
+(messages/thread-send t)                      ; opens the thread
+(messages/thread-send t "and then?")          ; sends only the new turn + previous_message_id
+(messages/thread-send-streaming t "more" prn)  ; returns the text, like stream-beta-message
+(messages/thread-append t {:role :user :content "queued"})
+(messages/thread-update t {:max-tokens 2048})
+(messages/thread-fork t)                      ; independent copy; replays history once
+(messages/thread-messages t)                  ; local history as message maps
+(messages/thread-last-message t)              ; latest reply map
+(messages/thread-previous-message-id t)
+(messages/thread-tool-runner t)               ; beta-tool-runner-handle bound to the thread
+```
+
+`create-beta-thread` also takes `:unsupported-request-behavior`
+(`:error` or `:continue-unthreaded`).
 
 ## Errors
 
@@ -471,7 +513,8 @@ maps-in/maps-out shape and error contract as `anthropic.core`:
   `anthropic.organization/update-compliance-settings`)
 - organization workspaces, with beta data-residency geo values returned as
   keywords
-- user profiles (including `:external-user-onboarded-at`, `:order-by`, and `:workspace-id`)
+- user profiles (including `:external-user-onboarded-at`, `:order-by`, and
+  `:workspace-id`), `delete-user-profile`, and `create-user-profile-action-url`
 - webhook payload parsing (including verified header-based unwrapping)
 
 ```clojure
@@ -511,16 +554,63 @@ support `:multiagent-20261001`:
                           :inline-agents {:enabled false}}}}
 ```
 
+Agent create and update requests accept `:execution-identity`, either
+`{:type :aws-role :role-arn "arn:aws:iam::..."}` or `{:type :service-account}`.
+Agent, session agent, and thread agent maps return it as `:execution-identity`.
+
 `list-session-threads` accepts an optional options map with `:statuses`, such
 as `{:statuses [:idle :running]}`.
 
-Webhook parsing covers agent, deployment, session, environment, and memory-store
-events. `stream-session-events` and `stream-thread-events` open SSE streams over
+Webhook parsing covers agent, deployment, session, environment, memory-store,
+vault, and user-profile enforcement-action events (the latter carry
+`:enforcement-action-id`). `stream-session-events` and `stream-thread-events` open SSE streams over
 the blocking client. They give you event maps keyed by `:type`, such as
 `:agent-message` and `:session-status-running`, like `stream` in
 `anthropic.core`.
 
 Beta endpoints may still change.
+
+## Organization administration
+
+`anthropic.organization` wraps the Admin API. GA operations use the stable
+client; beta-only operations use the beta client. Nested request maps (Slack
+identifiers, settings, workspace selectors, `type`-tagged unions) are built
+into the SDK's request objects; responses come back as kebab-case maps with
+keyword enums.
+
+- Workspace rate limits: `list-workspace-rate-limits`,
+  `update-workspace-rate-limit` (`{:limits [{:type :requests-per-minute :value 100}]}`),
+  and the beta twin `update-beta-workspace-rate-limit`
+- Spend limits: `list-spend-limits` takes `:workspace-id` and `:scope-type`
+  (including `:usage-tier`); spend-limit maps report usage-tier scopes
+- Analytics: `list-analytics-usage` and `list-analytics-cost` (require
+  `:starting-at`; take `:time-bucket-width`, `:group-by`, actor and id filters,
+  `:order`, `:order-by`), plus the summary, user, and report listings
+- Claude Tag: `list-claude-tag-bundles`, `get-claude-tag-bundle`,
+  `create-`/`get-`/`list-`/`delete-claude-tag-bundle-target(s)`,
+  `create-`/`get-`/`list-`/`update-`/`delete-claude-tag-slack-channel(s)`,
+  `list-`/`get-`/`update-claude-tag-slack-workspace(s)`
+- Telemetry destinations: `create-`/`get-`/`list-`/`update-`/`delete-telemetry-destination(s)`,
+  `test-telemetry-destination`, and `add-`/`list-`/`remove-telemetry-destination-workspace(s)`
+- Webhook endpoints: `create-`/`get-`/`list-`/`update-`/`delete-webhook-endpoint(s)` and
+  `regenerate-webhook-signing-secret`
+
+```clojure
+(require '[anthropic.organization :as org])
+
+(org/create-claude-tag-slack-channel
+ client {:slack {:channel-id "C123" :workspace-id "T456"}
+         :settings {:enabled true :guest-policy {:type :restrict}}})
+
+(org/create-telemetry-destination
+ client {:endpoint-url "https://otel.example.com/v1/traces"
+         :workspaces {:type :include :workspace-ids ["wrkspc_1"]}
+         :headers {"Authorization" "Bearer ..."}})
+
+(org/list-analytics-usage client {:starting-at "2026-10-01T00:00:00Z"
+                                  :time-bucket-width :day
+                                  :group-by [:model]})
+```
 
 ## Bedrock and Vertex
 

@@ -197,7 +197,25 @@
                 create-federation-rule get-federation-rule update-federation-rule
                 list-federation-rules archive-federation-rule
                 add-federation-rule-workspace list-federation-rule-workspaces
-                remove-federation-rule-workspace]]
+                remove-federation-rule-workspace
+                update-workspace-rate-limit update-beta-workspace-rate-limit
+                list-analytics-usage list-analytics-cost
+                list-claude-tag-bundles get-claude-tag-bundle
+                create-claude-tag-bundle-target get-claude-tag-bundle-target
+                list-claude-tag-bundle-targets delete-claude-tag-bundle-target
+                create-claude-tag-slack-channel get-claude-tag-slack-channel
+                list-claude-tag-slack-channels update-claude-tag-slack-channel
+                delete-claude-tag-slack-channel
+                list-claude-tag-slack-workspaces get-claude-tag-slack-workspace
+                update-claude-tag-slack-workspace
+                create-telemetry-destination get-telemetry-destination
+                list-telemetry-destinations update-telemetry-destination
+                delete-telemetry-destination test-telemetry-destination
+                add-telemetry-destination-workspace list-telemetry-destination-workspaces
+                remove-telemetry-destination-workspace
+                create-webhook-endpoint get-webhook-endpoint list-webhook-endpoints
+                update-webhook-endpoint delete-webhook-endpoint
+                regenerate-webhook-signing-secret]]
       (is (ifn? (ns-resolve 'anthropic.organization s))
           (str s " must be a public fn")))))
 
