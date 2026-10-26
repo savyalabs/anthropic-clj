@@ -12,6 +12,7 @@
                                                                BetaSpendLimit$Scope
                                                                BetaSpendLimitOrganizationScope
                                                                BetaSpendLimitPeriod
+                                                               BetaSpendLimitUsageTierScope
                                                                SpendLimitListParams$ScopeType
                                                                SpendLimitDeleteResponse)
            (java.time OffsetDateTime)))
@@ -34,7 +35,7 @@
       (.id "role_developer")
       (.createdAt timestamp)
       (.displayName "Developer role")
-      (.name "Developer")
+      (.putAdditionalProperty "name" (JsonValue/from "Developer"))
       (.type (JsonValue/from "rbac_role"))
       (.updatedAt timestamp)
       (.build)))
@@ -272,3 +273,40 @@
     (is (= "rbac_role" (:type first-role)))
     (is (= "2026-09-30T12:34:56Z" (:created-at first-role)))
     (is (= "2026-09-30T12:34:56Z" (:updated-at first-role)))))
+
+(deftest list-spend-limits-builds-workspace-and-usage-tier-params
+  (let [[_ params]
+        (exercise-list! :spend-limits []
+                        "com.anthropic.services.blocking.beta.organization.SpendLimitService"
+                        "com.anthropic.models.beta.organization.spendlimits.SpendLimitListPage"
+                        "com.anthropic.models.beta.organization.spendlimits.SpendLimitListPageResponse"
+                        (spend-limit)
+                        #(organization/list-spend-limits
+                          % {:workspace-id "wrkspc_1" :scope-type [:usage-tier]}))]
+    (is (= "wrkspc_1" (.orElse (.workspaceId params) nil)))
+    (is (= [SpendLimitListParams$ScopeType/USAGE_TIER] (.orElse (.scopeType params) nil)))))
+
+(deftest spend-limit-usage-tier-scope-round-trips
+  (let [usage-tier (-> (spend-limit)
+                       (.toBuilder)
+                       (.scope (BetaSpendLimit$Scope/ofUsageTier
+                                (-> (BetaSpendLimitUsageTierScope/builder)
+                                    (.type (JsonValue/from "usage_tier"))
+                                    (.build))))
+                       (.build))
+        [result] (exercise-single! :spend-limits
+                                   "com.anthropic.services.blocking.beta.organization.SpendLimitService"
+                                   usage-tier
+                                   #(organization/get-spend-limit % "sl_monthly_org"))]
+    (is (= {:type :usage-tier} (:scope result)))))
+
+(deftest set-spend-limit-builds-scope-from-map
+  (let [[_ params]
+        (exercise-single! :spend-limits
+                          "com.anthropic.services.blocking.beta.organization.SpendLimitService"
+                          (spend-limit)
+                          #(organization/set-spend-limit
+                            % {:amount "50.00" :period :monthly
+                               :scope {:type :workspace :workspace-id "wrkspc_1"}}))]
+    (is (.isWorkspace (.scope params)))
+    (is (= "wrkspc_1" (.workspaceId (.asWorkspace (.scope params)))))))

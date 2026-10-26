@@ -2,7 +2,7 @@
   (:import (com.anthropic.client AnthropicClient)
            (com.anthropic.services.blocking BetaService)
            (com.anthropic.services.blocking.beta OrganizationService)
-           (com.anthropic.core JsonValue)
+           (com.anthropic.core JsonValue ObjectMappers)
            (java.io ByteArrayInputStream)
            (java.lang.reflect InvocationHandler Proxy)
            (java.time LocalDate OffsetDateTime)
@@ -30,7 +30,18 @@
             (rbacGroups [_] (:rbac-groups services))
             (rbacRoles [_] (:rbac-roles services))
             (plugins [_] (:plugins services))
-            (pluginMarketplaces [_] (:plugin-marketplaces services))))))))
+            (pluginMarketplaces [_] (:plugin-marketplaces services))
+            (claudeTag [_] (:claude-tag services))
+            (telemetryDestinations [_] (:telemetry-destinations services))
+            (webhooks [_] (:webhooks services))
+            (workspaces [_] (:workspaces services))))))))
+
+(defn stable-client
+  "Builds a client whose GA services are supplied by services map."
+  [services]
+  (reify AnthropicClient
+    (organization [_] (:organization services))
+    (userProfiles [_] (:user-profiles services))))
 
 (declare complete-builder)
 
@@ -116,8 +127,9 @@
   [interface response captured]
   (proxy-service (Class/forName interface)
                  (fn [method args]
-                   (when (contains? #{"create" "retrieve" "update" "delete" "set"
-                                      "list" "remove" "validateArchive" "validateRepository"} method)
+                   (when (contains? #{"create" "retrieve" "update" "delete" "set" "list" "remove"
+                                      "add" "test" "regenerateSigningSecret"
+                                      "validateArchive" "validateRepository"} method)
                      (reset! captured (first args)))
                    (if (fn? response) (response args) response))))
 
@@ -148,3 +160,29 @@
                               captured)
         root-service (path-service interfaces service)]
     [(invoke (beta-client {root root-service})) @captured]))
+
+(defn exercise-path!
+  "Invokes invoke against a stub leaf service reached from root through
+  interfaces, returning result with captured params. response is an SDK object
+  or a fn of the call args."
+  [root interfaces leaf-interface response invoke]
+  (let [captured (atom nil)
+        service (leaf-service leaf-interface response captured)]
+    [(invoke (beta-client {root (path-service interfaces service)})) @captured]))
+
+(defn exercise-path-list!
+  "Like exercise-list! but takes ready SDK items, so tests can set real values."
+  [root interfaces leaf-interface page-class response-class items invoke]
+  (let [captured (atom nil)
+        page-service (proxy-service (Class/forName leaf-interface) (fn [_ _] nil))
+        service (leaf-service leaf-interface
+                              (fn [[params]]
+                                (list-page page-class response-class page-service params items))
+                              captured)]
+    [(invoke (beta-client {root (path-service interfaces service)})) @captured]))
+
+(defn from-json
+  "Deserializes a wire-shaped (snake_case) Clojure map into the SDK model
+  class-name, the way the SDK parses an HTTP response."
+  [class-name data]
+  (.convertValue (ObjectMappers/jsonMapper) data (Class/forName class-name)))

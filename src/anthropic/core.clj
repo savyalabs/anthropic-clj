@@ -27,6 +27,26 @@
                                                  VersionListPage VersionListParams
                                                  VersionRetrieveParams VersionDeleteParams)
            (com.anthropic.models.models ModelCapabilities ModelInfo ModelListPage ModelListParams)
+           (com.anthropic.models.userprofiles DeletedUserProfile
+                                              UserProfile
+                                              UserProfileAccessType
+                                              UserProfileCreateParams
+                                              UserProfileCreateParams$Metadata
+                                              UserProfileDeleteParams
+                                              UserProfileEnforcementStatus
+                                              UserProfileExternalUserAccountStatus
+                                              UserProfileExternalUserDetailsParams
+                                              UserProfileExternalUserEntityType
+                                              UserProfileListOrder
+                                              UserProfileListOrderBy
+                                              UserProfileListPage
+                                              UserProfileListParams
+                                              UserProfileRetrieveParams
+                                              UserProfileUpdateParams
+                                              UserProfileUpdateParams$Metadata)
+           (com.anthropic.models.userprofiles.actionurls ActionUrlCreateParams
+                                                         UserProfileActionUrl
+                                                         UserProfileEnrollEndUserAction)
            (com.anthropic.models.messages.batches BatchCreateParams
                                                   BatchCreateParams$Request
                                                   BatchCreateParams$Request$Params
@@ -64,6 +84,7 @@
                                           JsonOutputFormat JsonOutputFormat$Schema
                                           StructuredOutputConfig
                                           Message
+                                          MessageParam
                                           MessageCountTokensTool
                                           MessageCountTokensParams
                                           MessageCountTokensParams$Builder
@@ -1230,16 +1251,32 @@
         (.effort b (OutputConfig$Effort/of (name effort))))
       (.build b))))
 
-(defn- add-message [^MessageCreateParams$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- ->message-param ^MessageParam [{:keys [role content]}]
+  (let [blocks #(mapv ->content-block content)]
+    (case (keyword role)
+      :user (if (string? content)
+              (MessageParam/ofUser ^String content)
+              (MessageParam/ofUserOfContentBlockParams ^java.util.List (blocks)))
+      :assistant (if (string? content)
+                   (MessageParam/ofAssistant ^String content)
+                   (MessageParam/ofAssistantOfContentBlockParams ^java.util.List (blocks)))
+      :system (if (string? content)
+                (MessageParam/ofSystem ^String content)
+                (MessageParam/ofSystemOfBlocks ^java.util.List (mapv ->system-block content)))
+      (throw (ex-info "Unsupported message role"
+                      {:anthropic/error :unsupported-message-role :role role})))))
+
+(defn- add-message [^MessageCreateParams$Builder b message]
+  (.addMessage b (->message-param message)))
+
+(defn- ->speed-string
+  "Validate a `:speed` option and return its wire value."
+  ^String [speed]
+  (let [kw (keyword (name speed))]
+    (when-not (contains? #{:standard :fast} kw)
+      (throw (ex-info (str "Unknown speed " speed)
+                      {:anthropic/error :invalid-enum-value :key :speed :value speed})))
+    (name kw)))
 
 (defn- ->params
   "Translate a request map into the SDK's MessageCreateParams."
@@ -1247,7 +1284,7 @@
                                 temperature top-p top-k stop-sequences
                                 tool-choice thinking metadata service-tier diagnostics
                                 response-format output-type effort container inference-geo
-                                user-profile-id cache-control extra-headers
+                                user-profile-id cache-control speed extra-headers
                                 extra-query extra-body]
                          :or {model "claude-opus-4-8" max-tokens 1024}}]
   (let [b (doto (MessageCreateParams/builder)
@@ -1257,9 +1294,6 @@
       (if (string? system)
         (.system b ^String system)
         (.systemOfTextBlockParams b ^java.util.List (mapv ->system-block system))))
-    (when temperature (.temperature b (double temperature)))
-    (when top-p (.topP b (double top-p)))
-    (when top-k (.topK b (long top-k)))
     (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when thinking (.thinking b (->thinking thinking)))
@@ -1273,6 +1307,8 @@
     (when inference-geo (.inferenceGeo b ^String inference-geo))
     (when user-profile-id (.userProfileId b ^String user-profile-id))
     (when cache-control (.cacheControl b (->cache-control cache-control)))
+    (when speed
+      (.speed b (com.anthropic.models.messages.MessageCreateParams$Speed/of (->speed-string speed))))
     (when (or response-format output-type effort)
       (.outputConfig b (->output-config response-format effort output-type)))
     (doseq [t tools] (.addTool b (->tool t)))
@@ -1284,18 +1320,18 @@
     (doseq [[k v] extra-body]
       (let [^String property-name (name k)]
         (.putAdditionalBodyProperty b property-name (->json v))))
-    (.build b)))
+    (let [^MessageCreateParams params (.build b)]
+      (if (or temperature top-p top-k)
+        (let [^com.anthropic.models.messages.MessageCreateParams$Body$Builder body
+              (.toBuilder (._body params))]
+          (when temperature (.putAdditionalProperty body "temperature" (JsonValue/from (double temperature))))
+          (when top-p (.putAdditionalProperty body "top_p" (JsonValue/from (double top-p))))
+          (when top-k (.putAdditionalProperty body "top_k" (JsonValue/from (long top-k))))
+          (-> (.toBuilder params) (.body (.build body)) (.build)))
+        params))))
 
-(defn- add-count-message [^MessageCountTokensParams$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- add-count-message [^MessageCountTokensParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
 (defn- ->count-params
   "Translate a request map into the SDK's MessageCountTokensParams. Accepts the
@@ -1304,7 +1340,7 @@
   count-tokens request). Web-fetch tools accept `:use-cache` and `:citations`."
   ^MessageCountTokensParams [{:keys [model system messages tools thinking tool-choice
                                      response-format output-type effort user-profile-id
-                                     cache-control extra-headers extra-query
+                                     cache-control speed extra-headers extra-query
                                      extra-body]
                               :or {model "claude-opus-4-8"}}]
   (let [b (doto (MessageCountTokensParams/builder)
@@ -1317,6 +1353,8 @@
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when user-profile-id (.userProfileId b ^String user-profile-id))
     (when cache-control (.cacheControl b (->cache-control cache-control)))
+    (when speed
+      (.speed b (com.anthropic.models.messages.MessageCountTokensParams$Speed/of (->speed-string speed))))
     (when (or response-format output-type effort)
       (.outputConfig b (->output-config response-format effort output-type)))
     (doseq [t tools] (.addTool b (->count-tool t)))
@@ -1487,7 +1525,8 @@
         st (.serviceTier u)
         cc (.cacheCreation u)
         ig (.inferenceGeo u)
-        otd (.outputTokensDetails u)]
+        otd (.outputTokensDetails u)
+        sp (.speed u)]
     (cond-> {:input-tokens (.inputTokens u)
              :output-tokens (.outputTokens u)}
       (.isPresent ccit) (assoc :cache-creation-input-tokens (.get ccit))
@@ -1496,7 +1535,8 @@
       (.isPresent st) (assoc :service-tier (->keyword (.get st)))
       (.isPresent cc) (assoc :cache-creation (cache-creation->map (.get cc)))
       (.isPresent ig) (assoc :inference-geo (.get ig))
-      (.isPresent otd) (assoc :output-tokens-details (output-tokens-details->map (.get otd))))))
+      (.isPresent otd) (assoc :output-tokens-details (output-tokens-details->map (.get otd)))
+      (.isPresent sp) (assoc :speed (->keyword (.asString ^com.anthropic.models.messages.Usage$Speed (.get sp)))))))
 
 (defn- container-skill->map [^com.anthropic.models.messages.ContainerSkill s]
   {:skill-id (.skillId s)
@@ -1614,14 +1654,17 @@
                          {:role :user :content results})))
           (assoc resp :messages (conj messages (assistant-turn resp))))))))
 
-(defn- ->request-options ^RequestOptions [{:keys [timeout-ms response-validation] :as opts}]
+(defn- ->request-options ^RequestOptions [{:keys [timeout-ms response-validation follow-redirects] :as opts}]
   (if (or (contains? opts :timeout-ms)
-          (contains? opts :response-validation))
+          (contains? opts :response-validation)
+          (contains? opts :follow-redirects))
     (let [b (RequestOptions/builder)]
       (when (contains? opts :timeout-ms)
         (.timeout b (Duration/ofMillis (long timeout-ms))))
       (when (contains? opts :response-validation)
         (.responseValidation b (boolean response-validation)))
+      (when (contains? opts :follow-redirects)
+        (.followRedirects b (boolean follow-redirects)))
       (.build b))
     (RequestOptions/none)))
 
@@ -1750,9 +1793,9 @@
     (doseq [state lifecycle]
       (.addLifecycle b ^com.anthropic.models.models.ModelListParams$Lifecycle
                      (com.anthropic.models.models.ModelListParams$Lifecycle/of (name state))))
-    (doseq [beta betas]
-      (let [^String beta-name (if (keyword? beta) (name beta) beta)]
-        (.addBeta b beta-name)))
+    (when (seq betas)
+      (.putAdditionalHeaders b "anthropic-beta"
+                             (mapv #(if (keyword? %) (name %) %) betas)))
     (.build b)))
 
 (defn list-models
@@ -1776,16 +1819,8 @@
 
 ;; ---- Message Batches ------------------------------------------------------
 
-(defn- add-batch-message [^BatchCreateParams$Request$Params$Builder b {:keys [role content]}]
-  (let [r (keyword role)]
-    (if (string? content)
-      (case r
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case r
-          :user (.addUserMessageOfBlockParams b blocks)
-          :assistant (.addAssistantMessageOfBlockParams b blocks))))))
+(defn- add-batch-message [^BatchCreateParams$Request$Params$Builder b messages]
+  (.messages b ^java.util.List (mapv ->message-param messages)))
 
 (defn- ->batch-req-params
   "Translate a per-request map into batch params through `->params` so both
@@ -1804,12 +1839,9 @@
              [(.metadata p) #(.metadata b ^Metadata %)]
              [(.outputConfig p) #(.outputConfig b ^OutputConfig %)]
              [(.stopSequences p) #(.stopSequences b ^java.util.List %)]
-             [(.temperature p) #(.temperature b (double %))]
              [(.thinking p) #(.thinking b ^ThinkingConfigParam %)]
              [(.toolChoice p) #(.toolChoice b ^ToolChoice %)]
-             [(.tools p) #(.tools b ^java.util.List %)]
-             [(.topK p) #(.topK b (long %))]
-             [(.topP p) #(.topP b (double %))]]]
+             [(.tools p) #(.tools b ^java.util.List %)]]]
       (when (.isPresent ^java.util.Optional value)
         (setter (.get ^java.util.Optional value))))
     (when (some? stream)
@@ -1821,6 +1853,15 @@
     (when-let [tier (:service-tier req)]
       (.serviceTier b (BatchCreateParams$Request$Params$ServiceTier/of
                        (-> tier name (str/replace "-" "_")))))
+    (when-let [speed (:speed req)]
+      (.speed b (com.anthropic.models.messages.batches.BatchCreateParams$Request$Params$Speed/of
+                 (->speed-string speed))))
+    (when-let [temperature (:temperature req)]
+      (.putAdditionalProperty b "temperature" (JsonValue/from (double temperature))))
+    (when-let [top-p (:top-p req)]
+      (.putAdditionalProperty b "top_p" (JsonValue/from (double top-p))))
+    (when-let [top-k (:top-k req)]
+      (.putAdditionalProperty b "top_k" (JsonValue/from (long top-k))))
     (.build b)))
 
 (defn- ->batch-request ^BatchCreateParams$Request [{:keys [custom-id params]}]
@@ -2355,3 +2396,226 @@
      (let [^VersionListPage p (-> (.skills client) (.versions)
                                   (.list (->skill-version-list-params skill-id opts)))]
        (pagination/->lazy-pager skill-version->map (.autoPager p))))))
+
+;; ---- User profiles ----------------------------------------------------------
+;; The GA user profiles service. `anthropic.beta` keeps the beta-header twins.
+
+(defn- ->user-profile-enum
+  "Validate a keyword/string enum value and return its lower_snake wire form."
+  ^String [value allowed k]
+  (let [kw (->keyword (name value))]
+    (when-not (contains? allowed kw)
+      (throw (ex-info (str "Unknown " (name k) " " value)
+                      {:anthropic/error :invalid-enum-value :key k :value value})))
+    (str/replace (name kw) "-" "_")))
+
+(defn- ->offset-date-time ^java.time.OffsetDateTime [x]
+  (if (instance? java.time.OffsetDateTime x)
+    x
+    (java.time.OffsetDateTime/parse (str x))))
+
+(defn- ->user-profile-external-user-details ^UserProfileExternalUserDetailsParams
+  [{:keys [account-status country email-hash entity-type name-hash onboarded-at reference-id]}]
+  (let [b (UserProfileExternalUserDetailsParams/builder)]
+    (when account-status
+      (.accountStatus b (UserProfileExternalUserAccountStatus/of
+                         (->user-profile-enum account-status #{:active :suspended :blocked}
+                                              :account-status))))
+    (when country (.country b ^String country))
+    (when email-hash (.emailHash b ^String email-hash))
+    (when entity-type
+      (.entityType b (UserProfileExternalUserEntityType/of
+                      (->user-profile-enum entity-type
+                                           #{:individual :business :non-profit :government}
+                                           :entity-type))))
+    (when name-hash (.nameHash b ^String name-hash))
+    (when onboarded-at (.onboardedAt b (->offset-date-time onboarded-at)))
+    (when reference-id (.referenceId b ^String reference-id))
+    (.build b)))
+
+(defn- ->user-profile-access-type ^UserProfileAccessType [access-type]
+  (UserProfileAccessType/of
+   (->user-profile-enum access-type #{:application :passthrough} :access-type)))
+
+(defn- ->user-profile-create-params ^UserProfileCreateParams
+  [{:keys [name external-user-details metadata access-type workspace-id]}]
+  (let [b (UserProfileCreateParams/builder)]
+    (when name (.name b ^String name))
+    (when external-user-details
+      (.externalUserDetails b (->user-profile-external-user-details external-user-details)))
+    (when metadata
+      (let [mb (UserProfileCreateParams$Metadata/builder)]
+        (doseq [[k v] (walk/stringify-keys metadata)]
+          (.putAdditionalProperty mb ^String k (JsonValue/from v)))
+        (.metadata b (.build mb))))
+    (when access-type (.accessType b (->user-profile-access-type access-type)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-update-params ^UserProfileUpdateParams
+  [user-profile-id {:keys [name external-user-details metadata access-type workspace-id]}]
+  (let [b (UserProfileUpdateParams/builder)]
+    (.userProfileId b ^String user-profile-id)
+    (when name (.name b ^String name))
+    (when external-user-details
+      (.externalUserDetails b (->user-profile-external-user-details external-user-details)))
+    (when metadata
+      (let [mb (UserProfileUpdateParams$Metadata/builder)]
+        (doseq [[k v] (walk/stringify-keys metadata)]
+          (.putAdditionalProperty mb ^String k (JsonValue/from v)))
+        (.metadata b (.build mb))))
+    (when access-type (.accessType b (->user-profile-access-type access-type)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-list-params ^UserProfileListParams
+  [{:keys [enforcement-status limit order order-by page workspace-id]}]
+  (let [b (UserProfileListParams/builder)]
+    (when (seq enforcement-status)
+      (.enforcementStatus b ^java.util.List
+                          (mapv #(UserProfileEnforcementStatus/of
+                                  (->user-profile-enum % #{:unrestricted :pending :restricted :banned}
+                                                       :enforcement-status))
+                                enforcement-status)))
+    (when limit (.limit b (int limit)))
+    (when order
+      (.order b (UserProfileListOrder/of (->user-profile-enum order #{:asc :desc} :order))))
+    (when order-by
+      (.orderBy b (UserProfileListOrderBy/of
+                   (->user-profile-enum order-by #{:created-at :name} :order-by))))
+    (when page (.page b ^String page))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-retrieve-params ^UserProfileRetrieveParams
+  [user-profile-id {:keys [workspace-id]}]
+  (let [b (UserProfileRetrieveParams/builder)]
+    (.userProfileId b ^String user-profile-id)
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-delete-params ^UserProfileDeleteParams
+  [user-profile-id {:keys [workspace-id]}]
+  (let [b (UserProfileDeleteParams/builder)]
+    (.userProfileId b ^String user-profile-id)
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- ->user-profile-action-url-params ^ActionUrlCreateParams
+  [user-profile-id {:keys [action workspace-id]}]
+  ;; enroll-end-user is the only action the API defines today.
+  (->user-profile-enum (or action :enroll-end-user) #{:enroll-end-user} :action)
+  (let [b (ActionUrlCreateParams/builder)]
+    (.userProfileId b ^String user-profile-id)
+    (.action b (.build (UserProfileEnrollEndUserAction/builder)))
+    (when workspace-id (.workspaceId b ^String workspace-id))
+    (.build b)))
+
+(defn- kebab-data
+  "JSON-shaped Clojure data -> kebab keyword keys, dropping null values."
+  [x]
+  (cond
+    (map? x) (into {}
+                   (keep (fn [[k v]] (when (some? v) [(->keyword (name k)) (kebab-data v)])))
+                   x)
+    (sequential? x) (mapv kebab-data x)
+    :else x))
+
+(defn- statuses->keywords [x]
+  (walk/postwalk (fn [v]
+                   (if (and (map? v) (string? (:status v)))
+                     (update v :status ->keyword)
+                     v))
+                 x))
+
+(defn- user-profile->map [^UserProfile r]
+  (let [m (kebab-data (json->clj (JsonValue/from r)))
+        kw (fn [v] (some-> v ->keyword))]
+    (cond-> (-> m
+                (update :type kw)
+                (assoc :metadata (java->clj (.convert (JsonValue/from (.metadata r)) Object))))
+      (:access-type m) (update :access-type kw)
+      (:enforcement-status m) (update :enforcement-status kw)
+      (:external-user-details m)
+      (update :external-user-details
+              #(cond-> %
+                 (:account-status %) (update :account-status kw)
+                 (:entity-type %) (update :entity-type kw)))
+      (:enforcement-actions m)
+      (update :enforcement-actions
+              (fn [actions]
+                (mapv #(cond-> %
+                         (:type %) (update :type kw)
+                         (:reason %) (update :reason kw)
+                         (:action %) (update :action kw))
+                      actions)))
+      (:programs m) (update :programs statuses->keywords))))
+
+(defn- deleted-user-profile->map [^DeletedUserProfile r]
+  {:id (.id r)
+   :type (->keyword (.convert (._type r) String))})
+
+(defn- user-profile-action-url->map [^UserProfileActionUrl r]
+  {:url (.url r)
+   :expires-at (str (.expiresAt r))
+   :type (->keyword (.convert (._type r) String))})
+
+(defn create-user-profile
+  "Create a user profile with optional `:name`, `:access-type`
+  (`:application`/`:passthrough`), `:metadata`, `:external-user-details`, and
+  `:workspace-id`. Returns the profile map, including `:enforcement-status`,
+  `:enforcement-actions`, and `:programs`."
+  ([^AnthropicClient client] (create-user-profile client {}))
+  ([^AnthropicClient client req]
+   (with-api-errors
+     (user-profile->map (-> (.userProfiles client)
+                            (.create (->user-profile-create-params req)))))))
+
+(defn get-user-profile
+  "Get a user profile by id. Optional `opts` accepts `:workspace-id`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (get-user-profile client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id opts]
+   (with-api-errors
+     (user-profile->map (-> (.userProfiles client)
+                            (.retrieve (->user-profile-retrieve-params user-profile-id opts)))))))
+
+(defn list-user-profiles
+  "List user profiles with optional `:enforcement-status` (a seq of
+  `:unrestricted`/`:pending`/`:restricted`/`:banned`), `:order`, `:order-by`
+  (`:created-at`/`:name`), `:limit`, `:page`, and `:workspace-id`."
+  ([^AnthropicClient client] (list-user-profiles client {}))
+  ([^AnthropicClient client opts]
+   (with-api-errors
+     (let [^UserProfileListPage p (-> (.userProfiles client)
+                                      (.list (->user-profile-list-params opts)))]
+       (mapv user-profile->map (.autoPager p))))))
+
+(defn update-user-profile
+  "Update a user profile's `:name`, `:access-type`, `:metadata`,
+  `:external-user-details`, or `:workspace-id`."
+  [^AnthropicClient client ^String user-profile-id changes]
+  (with-api-errors
+    (user-profile->map (-> (.userProfiles client)
+                           (.update (->user-profile-update-params user-profile-id changes))))))
+
+(defn delete-user-profile
+  "Delete a user profile. Optional `opts` accepts `:workspace-id`. Returns
+  `{:id ... :type :user-profile-deleted}`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (delete-user-profile client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id opts]
+   (with-api-errors
+     (deleted-user-profile->map (-> (.userProfiles client)
+                                    (.delete (->user-profile-delete-params user-profile-id opts)))))))
+
+(defn create-user-profile-action-url
+  "Create a short-lived URL for a user profile action. `opts` accepts
+  `:action` (default and only value `:enroll-end-user`) and `:workspace-id`.
+  Returns `{:url ... :expires-at ... :type ...}`."
+  ([^AnthropicClient client ^String user-profile-id]
+   (create-user-profile-action-url client user-profile-id {}))
+  ([^AnthropicClient client ^String user-profile-id opts]
+   (let [params (->user-profile-action-url-params user-profile-id opts)]
+     (with-api-errors
+       (user-profile-action-url->map (-> (.userProfiles client) (.actionUrls) (.create params)))))))

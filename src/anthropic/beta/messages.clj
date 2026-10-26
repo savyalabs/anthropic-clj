@@ -10,7 +10,7 @@
            (com.anthropic.core JsonValue RequestOptions)
            (com.anthropic.core.http Headers HttpResponse HttpResponseFor StreamResponse)
            (com.anthropic.errors AnthropicException)
-           (com.anthropic.helpers BetaToolRunner)
+           (com.anthropic.helpers BetaMessageThread BetaToolRunner)
            (com.anthropic.models.beta.messages BetaBase64ImageSource
                                                BetaBase64ImageSource$MediaType
                                                BetaBase64PdfSource
@@ -33,8 +33,16 @@
                                                BetaJsonOutputFormat
                                                BetaJsonOutputFormat$Schema
                                                BetaMessage BetaMessageTokensCount
-                                               BetaMessageParam BetaMessageParam$Builder
-                                               BetaMessageParam$Role BetaMessageParam$ClearAt
+                                               BetaMessageParam
+                                               BetaMessageThreadParam
+                                               ThreadCreateParams
+                                               ThreadCreateParams$UnsupportedRequestBehavior
+                                               ThreadSendParams$Builder
+                                               BetaThreadContinueParams
+                                               BetaThreadCreateParams
+                                               BetaSystemMessageParam BetaSystemMessageParam$Builder
+                                               BetaSystemMessageParam$ClearAt
+                                               BetaSystemMessageParam$Content$SystemMessageContentBlock
                                                BetaMetadata BetaOutputConfig
                                                BetaOutputConfig$Effort
                                                StructuredOutputConfig
@@ -1152,18 +1160,60 @@
 (defn- ->message-param
   ^BetaMessageParam
   [{:keys [role content clear-at output-config]}]
-  (let [^BetaMessageParam$Builder b (BetaMessageParam/builder)]
-    (.role b (BetaMessageParam$Role/of (name (keyword role))))
-    (if (string? content)
-      (.content b ^String content)
-      (.contentOfBetaContentBlockParams b ^java.util.List (mapv ->content-block content)))
-    (when clear-at
-      (let [^BetaMessageParam$ClearAt value
-            (->enum-value clear-at #{:never :next-user-message}
-                          (fn [s#] (BetaMessageParam$ClearAt/of s#)) :clear-at)]
-        (.clearAt b value)))
-    (when output-config (.outputConfig b (->system-message-output-config output-config)))
-    (.build b)))
+  (let [role (keyword role)
+        blocks #(mapv ->content-block content)]
+    (case role
+      :user (if (or clear-at output-config)
+              (-> (JsonValue/access$getJSON_MAPPER$cp)
+                  (.readValue (json/write-value-as-string
+                               (->wire-data {:role role :content content
+                                             :clear-at clear-at :output-config output-config}))
+                              BetaMessageParam))
+              (if (string? content)
+                (BetaMessageParam/ofUser ^String content)
+                (BetaMessageParam/ofUserOfContentBlockParams ^java.util.List (blocks))))
+      :assistant (if (or clear-at output-config)
+                   (-> (JsonValue/access$getJSON_MAPPER$cp)
+                       (.readValue (json/write-value-as-string
+                                    (->wire-data {:role role :content content
+                                                  :clear-at clear-at :output-config output-config}))
+                                   BetaMessageParam))
+                   (if (string? content)
+                     (BetaMessageParam/ofAssistant ^String content)
+                     (BetaMessageParam/ofAssistantOfContentBlockParams ^java.util.List (blocks))))
+      :system (let [^BetaSystemMessageParam$Builder b (BetaSystemMessageParam/builder)]
+                (if (string? content)
+                  (.content b ^String content)
+                  (.contentOfBlocks
+                   b ^java.util.List
+                   (mapv (fn [block]
+                           (BetaSystemMessageParam$Content$SystemMessageContentBlock/ofText
+                            ^BetaTextBlockParam (->system-block block)))
+                         content)))
+                (when clear-at
+                  (.clearAt b ^BetaSystemMessageParam$ClearAt
+                            (->enum-value clear-at #{:never :next-user-message}
+                                          (fn [^String s#] (BetaSystemMessageParam$ClearAt/of s#)) :clear-at)))
+                (when output-config
+                  (.outputConfig b (->system-message-output-config output-config)))
+                (BetaMessageParam/ofSystem (.build b)))
+      (throw (ex-info "Unsupported beta message role"
+                      {:anthropic/error :unsupported-message-role :role role})))))
+
+(defn- ->thread-param
+  "`{:previous-message-id \"msg_...\"}` continues a thread from that message;
+  `{:type :create}` starts a new one."
+  ^BetaMessageThreadParam [{:keys [type previous-message-id]}]
+  (case (if previous-message-id
+          :continue
+          (->enum-value (or type :continue) #{:continue :create}
+                        #(keyword (str/lower-case %)) :thread))
+    :continue (do (when-not previous-message-id
+                    (throw (ex-info "Missing required key :previous-message-id"
+                                    {:anthropic/error :missing-key :key :previous-message-id})))
+                  (BetaMessageThreadParam/ofContinue
+                   (BetaThreadContinueParams/of ^String previous-message-id)))
+    :create (BetaMessageThreadParam/ofCreate (.build (BetaThreadCreateParams/builder)))))
 
 (defn- ->mcp-server ^BetaRequestMcpServerUrlDefinition
   [{:keys [name url authorization-token tool-configuration]}]
@@ -1180,38 +1230,18 @@
         (.toolConfiguration b (.build tb))))
     (.build b)))
 
-(defn- add-create-message [^MessageCreateParams$Builder b {:keys [role content] :as message}]
-  (let [role (keyword role)]
-    (if (or (contains? message :clear-at) (contains? message :output-config))
-      (.addMessage b (->message-param message))
-      (if (string? content)
-      (case role
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case role
-          :user (.addUserMessageOfBetaContentBlockParams b ^java.util.List blocks)
-          :assistant (.addAssistantMessageOfBetaContentBlockParams b ^java.util.List blocks)))))))
+(defn- add-create-message [^MessageCreateParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
-(defn- add-count-message [^MessageCountTokensParams$Builder b {:keys [role content] :as message}]
-  (let [role (keyword role)]
-    (if (or (contains? message :clear-at) (contains? message :output-config))
-      (.addMessage b (->message-param message))
-      (if (string? content)
-      (case role
-        :user (.addUserMessage b ^String content)
-        :assistant (.addAssistantMessage b ^String content))
-      (let [blocks (mapv ->content-block content)]
-        (case role
-          :user (.addUserMessageOfBetaContentBlockParams b ^java.util.List blocks)
-          :assistant (.addAssistantMessageOfBetaContentBlockParams b ^java.util.List blocks)))))))
+(defn- add-count-message [^MessageCountTokensParams$Builder b message]
+  (.addMessage b (->message-param message)))
 
 (defn- ->params ^MessageCreateParams
   [{:keys [model max-tokens system messages tools temperature top-p top-k stop-sequences
            tool-choice thinking metadata service-tier response-format output-format output-type effort container inference-geo
            task-budget
            compaction context-management diagnostics speed
-           user-profile-id cache-control betas mcp-servers fallbacks fallback-credit-token
+           user-profile-id cache-control betas mcp-servers fallbacks fallback-credit-token thread
            extra-headers extra-query extra-body]
     :or {model "claude-opus-4-8" max-tokens 1024}}]
   (let [^String model-name (if (keyword? model) (name model) model)
@@ -1222,9 +1252,6 @@
       (if (string? system)
         (.system b ^String system)
         (.systemOfBetaTextBlockParams b ^java.util.List (mapv ->system-block system))))
-    (when temperature (.temperature b (double temperature)))
-    (when top-p (.topP b (double top-p)))
-    (when top-k (.topK b (long top-k)))
     (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
     (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
     (when thinking (.thinking b (->thinking thinking)))
@@ -1253,6 +1280,7 @@
         (.fallbacksDefault b)
         (.fallbacksOfFallbackParams b (mapv ->fallback-param fallbacks))))
     (when fallback-credit-token (.fallbackCreditToken b ^String fallback-credit-token))
+    (when thread (.thread b (->thread-param thread)))
     (doseq [beta betas]
       (let [^String beta-name (if (keyword? beta) (name beta) beta)]
         (.addBeta b beta-name)))
@@ -1262,7 +1290,15 @@
     (doseq [[k v] extra-headers] (.putAdditionalHeader b ^String (name k) ^String v))
     (doseq [[k v] extra-query] (.putAdditionalQueryParam b ^String (name k) ^String v))
     (doseq [[k v] extra-body] (.putAdditionalBodyProperty b ^String (name k) (->json v)))
-    (.build b)))
+    (let [^MessageCreateParams params (.build b)]
+      (if (or temperature top-p top-k)
+        (let [^com.anthropic.models.beta.messages.MessageCreateParams$Body$Builder body
+              (.toBuilder (._body params))]
+          (when temperature (.putAdditionalProperty body "temperature" (JsonValue/from (double temperature))))
+          (when top-p (.putAdditionalProperty body "top_p" (JsonValue/from (double top-p))))
+          (when top-k (.putAdditionalProperty body "top_k" (JsonValue/from (long top-k))))
+          (-> (.toBuilder params) (.body (.build body)) (.build)))
+        params))))
 
 (defn- ->count-params ^MessageCountTokensParams
   [{:keys [model system messages tools thinking tool-choice betas cache-control compaction context-management
@@ -1373,13 +1409,16 @@
               (JsonValue/from ^BetaCountTokensContextManagementResponse
                              (.get context-management)))))))
 
-(defn- ->request-options ^RequestOptions [{:keys [timeout-ms response-validation] :as opts}]
-  (if (or (contains? opts :timeout-ms) (contains? opts :response-validation))
+(defn- ->request-options ^RequestOptions [{:keys [timeout-ms response-validation follow-redirects] :as opts}]
+  (if (or (contains? opts :timeout-ms) (contains? opts :response-validation)
+          (contains? opts :follow-redirects))
     (let [b (RequestOptions/builder)]
       (when (contains? opts :timeout-ms)
         (.timeout b (java.time.Duration/ofMillis (long timeout-ms))))
       (when (contains? opts :response-validation)
         (.responseValidation b (boolean response-validation)))
+      (when (contains? opts :follow-redirects)
+        (.followRedirects b (boolean follow-redirects)))
       (.build b))
     (RequestOptions/none)))
 
@@ -1591,11 +1630,10 @@
              [(.metadata p) #(.metadata b ^BetaMetadata %)]
              [(.outputConfig p) #(.outputConfig b ^BetaOutputConfig %)]
              [(.stopSequences p) #(.stopSequences b ^java.util.List %)]
-             [(.temperature p) #(.temperature b (double %))]
              [(.thinking p) #(.thinking b ^BetaThinkingConfigParam %)]
              [(.toolChoice p) #(.toolChoice b ^BetaToolChoice %)]
              [(.tools p) #(.tools b ^java.util.List %)]
-             [(.topK p) #(.topK b (long %))] [(.topP p) #(.topP b (double %))]]]
+             [(.thread p) #(.thread b ^BetaMessageThreadParam %)]]]
       (when (.isPresent ^java.util.Optional value) (setter (.get ^java.util.Optional value))))
     (when-let [container (:container req)]
       (if (string? container)
@@ -1607,6 +1645,12 @@
     (when-let [tier (:service-tier req)]
       (.serviceTier b (BatchCreateParams$Request$Params$ServiceTier/of
                        (-> tier name (str/replace "-" "_")))))
+    (when-let [temperature (:temperature req)]
+      (.putAdditionalProperty b "temperature" (JsonValue/from (double temperature))))
+    (when-let [top-p (:top-p req)]
+      (.putAdditionalProperty b "top_p" (JsonValue/from (double top-p))))
+    (when-let [top-k (:top-k req)]
+      (.putAdditionalProperty b "top_k" (JsonValue/from (long top-k))))
     (.build b)))
 
 (defn- ->batch-request ^BatchCreateParams$Request [{:keys [custom-id params]}]
@@ -1730,6 +1774,161 @@
   ([^AnthropicClient client req opts]
    (stream-beta-message-handle client req nil
                                (assoc (or opts {}) :buffer-size (or (:buffer-size opts) 64)))))
+
+;; ---- Message threads -----------------------------------------------------
+;; A thread wraps the SDK's stateful `BetaMessageThread` helper: after the
+;; first send, each send carries only the new turns plus the previous reply's
+;; id, and the server supplies the rest of the history.
+
+(defn- ->thread-create-params ^ThreadCreateParams
+  [{:keys [unsupported-request-behavior] :as req}]
+  (let [^MessageCreateParams p (->params (dissoc req :thread :unsupported-request-behavior))
+        b (ThreadCreateParams/builder)]
+    (.maxTokens b (._maxTokens p))
+    (.messages b (._messages p))
+    (.model b (._model p))
+    (.cacheControl b (._cacheControl p))
+    (.compaction b (._compaction p))
+    (.container b (._container p))
+    (.contextManagement b (._contextManagement p))
+    (.diagnostics b (._diagnostics p))
+    (.fallbackCreditToken b (._fallbackCreditToken p))
+    (.fallbacks b (._fallbacks p))
+    (.inferenceGeo b (._inferenceGeo p))
+    (.mcpServers b (._mcpServers p))
+    (.metadata b (._metadata p))
+    (.outputConfig b (._outputConfig p))
+    (.outputFormat b (._outputFormat p))
+    (.serviceTier b (._serviceTier p))
+    (.speed b (._speed p))
+    (.stopSequences b (._stopSequences p))
+    (.system b (._system p))
+    (.thinking b (._thinking p))
+    (.toolChoice b (._toolChoice p))
+    (.tools b (._tools p))
+    (.betas b (.betas p))
+    (.userProfileId b (.userProfileId p))
+    (.workspaceId b (.workspaceId p))
+    (.putAllAdditionalBodyProperties b (._additionalBodyProperties p))
+    (.putAllAdditionalHeaders b (._additionalHeaders p))
+    (.putAllAdditionalQueryParams b (._additionalQueryParams p))
+    (when unsupported-request-behavior
+      (.unsupportedRequestBehavior
+       b (case (keyword unsupported-request-behavior)
+           :error ThreadCreateParams$UnsupportedRequestBehavior/ERROR
+           :continue-unthreaded ThreadCreateParams$UnsupportedRequestBehavior/CONTINUE_UNTHREADED
+           (throw (ex-info "Unsupported unsupported-request-behavior value"
+                           {:anthropic/error :invalid-enum-value
+                            :key :unsupported-request-behavior
+                            :value unsupported-request-behavior})))))
+    (.build b)))
+
+(defn create-beta-thread
+  "Start a beta message thread from a `create-beta-message` request map and
+  return an opaque thread handle for the `thread-*` fns. Nothing is sent until
+  `thread-send`. `:unsupported-request-behavior` (`:error` by default, or
+  `:continue-unthreaded`) decides what happens when a request cannot be
+  threaded."
+  ^BetaMessageThread [^AnthropicClient client req]
+  (with-api-errors
+    (.thread (.messages (.beta client)) (->thread-create-params req))))
+
+(defn- thread-send* [^BetaMessageThread thread message streaming?]
+  (cond
+    (nil? message) (if streaming? (.sendStreaming thread) (.send thread))
+    (string? message) (if streaming?
+                        (.sendStreaming thread ^String message)
+                        (.send thread ^String message))
+    (map? message) (let [param (->message-param message)]
+                     (if streaming? (.sendStreaming thread param) (.send thread param)))
+    :else (let [^java.util.List params (mapv ->message-param message)]
+            (if streaming? (.sendStreaming thread params) (.send thread params)))))
+
+(defn thread-send
+  "Send the thread's pending turns plus `message` (a user text string, a
+  message map, or a seq of message maps) and return the reply as a map like
+  `create-beta-message`'s. With no message, sends what the thread holds."
+  ([^BetaMessageThread thread] (thread-send thread nil))
+  ([^BetaMessageThread thread message]
+   (with-api-errors
+     (beta-message->map (thread-send* thread message false)))))
+
+(defn thread-send-streaming
+  "Streaming `thread-send`: `on-event` receives normalized event maps, and the
+  concatenated text is returned, as with `stream-beta-message`. The thread
+  records the reply once the stream completes."
+  ^String [^BetaMessageThread thread message on-event]
+  (with-api-errors
+    (consume-beta-stream (thread-send* thread message true) on-event)))
+
+(defn thread-append
+  "Add a message map, or a seq of them, to the thread without sending."
+  [^BetaMessageThread thread message]
+  (with-api-errors
+    (if (map? message)
+      (.append thread (->message-param message))
+      (.append thread ^java.util.List (mapv ->message-param message)))
+    thread))
+
+(defn thread-update
+  "Change request fields used by later sends: `:model`, `:max-tokens`,
+  `:system`, `:stop-sequences`, `:thinking`, `:tool-choice`, `:tools`,
+  `:metadata`, `:inference-geo`, `:user-profile-id`, `:cache-control`, and
+  `:betas`."
+  [^BetaMessageThread thread {:keys [model max-tokens system stop-sequences thinking tool-choice
+                                     tools metadata inference-geo user-profile-id cache-control
+                                     betas]}]
+  (with-api-errors
+    (.update thread
+             (reify java.util.function.Consumer
+               (accept [_ builder]
+                 (let [^ThreadSendParams$Builder b builder]
+                   (when model
+                     (let [^String model-name (if (keyword? model) (name model) model)]
+                       (.model b model-name)))
+                   (when max-tokens (.maxTokens b (long max-tokens)))
+                   (when system
+                     (if (string? system)
+                       (.system b ^String system)
+                       (.systemOfBetaTextBlockParams b ^java.util.List (mapv ->system-block system))))
+                   (when (seq stop-sequences) (.stopSequences b ^java.util.List (vec stop-sequences)))
+                   (when thinking (.thinking b (->thinking thinking)))
+                   (when tool-choice (.toolChoice b (->tool-choice tool-choice)))
+                   (when tools (.tools b ^java.util.List (mapv ->tool tools)))
+                   (when metadata (.metadata b (->metadata metadata)))
+                   (when inference-geo (.inferenceGeo b ^String inference-geo))
+                   (when user-profile-id (.userProfileId b ^String user-profile-id))
+                   (when cache-control (.cacheControl b (->cache-control cache-control)))
+                   (doseq [beta betas]
+                     (let [^String beta-name (if (keyword? beta) (name beta) beta)]
+                       (.addBeta b beta-name)))))))
+    thread))
+
+(defn thread-fork
+  "Copy the thread's local history into a new, independent thread handle. Its
+  next send opens a new server-side thread."
+  ^BetaMessageThread [^BetaMessageThread thread]
+  (with-api-errors (.fork thread)))
+
+(defn thread-messages
+  "The thread's local message history as message maps."
+  [^BetaMessageThread thread]
+  (mapv beta-message-param->map (.messages thread)))
+
+(defn thread-last-message
+  "The most recent reply as a message map, or nil before the first send."
+  [^BetaMessageThread thread]
+  (some-> ^java.util.Optional (.lastMessage thread) (.orElse nil) beta-message->map))
+
+(defn thread-previous-message-id
+  "The id the next send continues from, or nil before the first send."
+  [^BetaMessageThread thread]
+  (.orElse (.previousMessageId thread) nil))
+
+(defn thread-tool-runner
+  "A `beta-tool-runner-handle` that runs tools within the thread."
+  [^BetaMessageThread thread]
+  (with-api-errors (beta-tool-runner-handle* (.toolRunner thread))))
 
 (def cancel-stream! stream-control/cancel-stream!)
 (def close-stream! stream-control/close-stream!)

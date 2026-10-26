@@ -494,3 +494,99 @@
        :token-type}
      :requests 1 [:claude-tag-category :context-window :cost-type :inference-geo
                   :speed :token-type])))
+
+(deftest list-analytics-usage-builds-params
+  (let [[result params]
+        (support/exercise-list!
+         :analytics [analytics-service]
+         "com.anthropic.services.blocking.beta.organization.analytics.UsageService"
+         "com.anthropic.models.beta.organization.analytics.usage.UsageListPage"
+         "com.anthropic.models.beta.organization.analytics.usage.UsageListPageResponse"
+         "com.anthropic.models.beta.organization.analytics.usage.BetaAnalyticsUsageItem"
+         #(organization/list-analytics-usage
+           % {:starting-at "2026-10-01T00:00:00Z"
+              :ending-at "2026-10-08T00:00:00Z"
+              :time-bucket-width :day
+              :actor-types [:user-actor :service-account-actor]
+              :actor-ids ["user_1"]
+              :group-by [:model :workspace-id]
+              :products [:claude-code :messages-api]
+              :workspace-ids ["wrkspc_1"]
+              :exclude-deleted-users true
+              :order :desc
+              :order-by :total-tokens
+              :limit 50
+              :page "usage-page"}))]
+    (is (= "2026-10-01T00:00Z" (str (.startingAt params))))
+    (is (= "2026-10-08T00:00Z" (str (present (.endingAt params)))))
+    (is (= "1d" (.asString (present (.timeBucketWidth params)))))
+    (is (= ["user_actor" "service_account_actor"] (enum-values (.actorTypes params))))
+    (is (= ["user_1"] (vec (present (.actorIds params)))))
+    (is (= ["model" "workspace_id"] (enum-values (.groupBy params))))
+    (is (= ["claude_code" "messages_api"] (enum-values (.products params))))
+    (is (= ["wrkspc_1"] (vec (present (.workspaceIds params)))))
+    (is (= true (present (.excludeDeletedUsers params))))
+    (is (= "desc" (.asString (present (.order params)))))
+    (is (= "total_tokens" (.asString (present (.orderBy params)))))
+    (is (= 50 (present (.limit params))))
+    (is (= "usage-page" (present (.page params))))
+    (is (= 2 (count result)))
+    (is (kebab-keys? (first result)))))
+
+(deftest list-analytics-usage-requires-starting-at
+  (let [error (try (organization/list-analytics-usage (support/beta-client {}) {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+    (is (= {:anthropic/error :missing-key :key :starting-at}
+           (select-keys (ex-data error) [:anthropic/error :key])))))
+
+(deftest list-analytics-usage-round-trips
+  (let [item (support/from-json
+              "com.anthropic.models.beta.organization.analytics.usage.BetaAnalyticsUsageItem"
+              {"starting_at" "2026-10-01T00:00:00Z"
+               "ending_at" "2026-10-02T00:00:00Z"
+               "group" {"model" "claude-opus-5-5" "workspace_id" "wrkspc_1"}
+               "metrics" {"requests" 12 "output_tokens" 300}})
+        [result]
+        (support/exercise-path-list!
+         :analytics [analytics-service]
+         "com.anthropic.services.blocking.beta.organization.analytics.UsageService"
+         "com.anthropic.models.beta.organization.analytics.usage.UsageListPage"
+         "com.anthropic.models.beta.organization.analytics.usage.UsageListPageResponse"
+         [item]
+         #(organization/list-analytics-usage % {:starting-at "2026-10-01T00:00:00Z"}))]
+    (is (= [{:starting-at "2026-10-01T00:00:00Z"
+             :ending-at "2026-10-02T00:00:00Z"
+             :group {:model "claude-opus-5-5" :workspace-id "wrkspc_1"}
+             :metrics {:requests 12 :output-tokens 300}}]
+           result))))
+
+(deftest list-analytics-cost-builds-params
+  (let [[result params]
+        (support/exercise-list!
+         :analytics [analytics-service]
+         "com.anthropic.services.blocking.beta.organization.analytics.CostService"
+         "com.anthropic.models.beta.organization.analytics.cost.CostListPage"
+         "com.anthropic.models.beta.organization.analytics.cost.CostListPageResponse"
+         "com.anthropic.models.beta.organization.analytics.cost.BetaAnalyticsCostItem"
+         #(organization/list-analytics-cost
+           % {:starting-at "2026-10-01T00:00:00Z"
+              :time-bucket-width :hour
+              :group-by [:cost-type :token-type]
+              :order-by :list-amount
+              :order :asc
+              :api-key-ids ["apikey_1"]}))]
+    (is (= "2026-10-01T00:00Z" (str (.startingAt params))))
+    (is (= "1h" (.asString (present (.timeBucketWidth params)))))
+    (is (= ["cost_type" "token_type"] (enum-values (.groupBy params))))
+    (is (= "list_amount" (.asString (present (.orderBy params)))))
+    (is (= "asc" (.asString (present (.order params)))))
+    (is (= ["apikey_1"] (vec (present (.apiKeyIds params)))))
+    (is (= 2 (count result)))))
+
+(deftest list-analytics-cost-requires-starting-at
+  (let [error (try (organization/list-analytics-cost (support/beta-client {}) {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+    (is (= {:anthropic/error :missing-key :key :starting-at}
+           (select-keys (ex-data error) [:anthropic/error :key])))))
