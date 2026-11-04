@@ -5,6 +5,20 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-03
+
+### Added
+
+- Wrap stable organization analytics activity listings, RBAC group members and
+  role permissions, effective spend limits, and spend-limit increase requests.
+- Surface Managed Agents tool-use-limit and compaction-limit session errors,
+  including their retry status.
+
+### Changed
+
+- Bump `anthropic-java` to **3.4.0**. Organization analytics and RBAC wrappers
+  now use the stable services that replace their beta counterparts.
+
 ## [0.44.0] - 2026-10-25
 
 ### Added

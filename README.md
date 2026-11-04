@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.44.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.45.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.44.0"]
+[net.clojars.savya/anthropic-clj "0.45.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -62,7 +62,7 @@ OpenTelemetry tracing is reachable through `:configure`, for example
 settings are reachable with the SDK's `(.withOptions client consumer)` on a
 built client. This library adds no OpenTelemetry dependency.
 
-Tracks [`com.anthropic/anthropic-java` 3.3.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.3.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 3.4.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.4.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -583,7 +583,13 @@ keyword enums.
   and the beta twin `update-beta-workspace-rate-limit`
 - Spend limits: `list-spend-limits` takes `:workspace-id` and `:scope-type`
   (including `:usage-tier`); spend-limit maps report usage-tier scopes
-- Analytics: `list-analytics-usage` and `list-analytics-cost` (require
+- Stable spend-limit administration: `list-effective-spend-limits` and
+  `list-`/`get-`/`approve-`/`deny-spend-limit-increase-request(s)`
+- RBAC: group create/retrieve/update/list/delete plus
+  `add-`/`list-`/`remove-rbac-group-member(s)` and
+  `list-rbac-role-permissions`
+- Analytics: stable summary, user, connector, plugin, skill, artifact, and
+  Chat-project listings; `list-analytics-usage` and `list-analytics-cost` (require
   `:starting-at`; take `:time-bucket-width`, `:group-by`, actor and id filters,
   `:order`, `:order-by`), plus the summary, user, and report listings
 - Claude Tag: `list-claude-tag-bundles`, `get-claude-tag-bundle`,

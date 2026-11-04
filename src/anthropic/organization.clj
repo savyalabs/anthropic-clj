@@ -5,8 +5,9 @@
   members/rate-limits/service-accounts, and identity federation (issuers, rules,
   and rule workspaces).
 
-  GA operations use the stable client path; beta-only administration operations
-  remain under the beta client. Build a request as a
+  GA operations, including analytics, RBAC, and spend-limit administration,
+  use the stable client path; remaining beta-only administration operations
+  stay under the beta client. Build a request as a
   Clojure map, get a Clojure map back. Errors follow `anthropic.core`'s
   contract: API/IO failures are ex-info keyed `:anthropic/error` with the SDK
   exception as cause.
@@ -25,6 +26,19 @@
            (com.anthropic.models.organization.compliancesettings
                                              OrganizationComplianceSettings
                                              ComplianceSettingUpdateParams)
+           (com.anthropic.models.organization.analytics.summaries SummaryListParams)
+           (com.anthropic.models.organization.analytics.users UserListParams)
+           (com.anthropic.models.organization.analytics.apps.chat.projects ProjectListParams)
+           (com.anthropic.models.organization.analytics.connectors ConnectorListParams)
+           (com.anthropic.models.organization.analytics.plugins PluginListParams)
+           (com.anthropic.models.organization.analytics.skills SkillListParams)
+           (com.anthropic.models.organization.analytics.artifacts ArtifactListParams)
+           (com.anthropic.models.organization.rbacgroups RbacGroupCreateParams RbacGroupRetrieveParams RbacGroupUpdateParams RbacGroupListParams RbacGroupDeleteParams)
+           (com.anthropic.models.organization.rbacgroups.members MemberAddParams MemberListParams MemberRemoveParams)
+           (com.anthropic.models.organization.rbacroles RbacRoleRetrieveParams RbacRoleListParams)
+           (com.anthropic.models.organization.rbacroles.permissions PermissionListParams)
+           (com.anthropic.models.organization.spendlimits.effective EffectiveListParams)
+           (com.anthropic.models.organization.spendlimits.increaserequests IncreaseRequestListParams IncreaseRequestRetrieveParams IncreaseRequestApproveParams IncreaseRequestDenyParams)
            (java.util Optional)))
 
 (set! *warn-on-reflection* true)
@@ -272,13 +286,15 @@
         (first plain)
         (first candidates))))
 
-(defn- ->dynamic-params [class-name opts]
-  (let [^Class param-class (Class/forName class-name)
+(defn- ->dynamic-params [class-or-name opts]
+  (let [^Class param-class (if (instance? Class class-or-name)
+                             class-or-name
+                             (Class/forName class-or-name))
         builder (dynamic-static-call param-class "builder")]
     (doseq [[key value] opts :when (some? value)]
       (let [method (builder-setter builder (camel-key key) value)]
         (when-not method
-          (throw (ex-info (str "Unknown option " key " for " class-name)
+          (throw (ex-info (str "Unknown option " key " for " (.getName param-class))
                           {:anthropic/error :invalid-option :key key})))
         (try
           (.invoke method builder
@@ -292,6 +308,9 @@
 
 (defn- beta-organization [^AnthropicClient client]
   (-> (.beta client) (.organization)))
+
+(defn- stable-organization [^AnthropicClient client]
+  (.organization client))
 
 (defn- dynamic-list [service params]
   (let [page (dynamic-call service "list" params)
@@ -1313,40 +1332,43 @@
       (obj->clj (-> (.organization client) (.federation) (.rules) (.workspaces)
                     (.remove (.build b)))))))
 
-;; ---- Beta-only administration --------------------------------------------
+;; ---- Organization administration -----------------------------------------
 
-(defn- analytics [client] (dynamic-call (beta-organization client) "analytics"))
+(defn- analytics [client] (dynamic-call (stable-organization client) "analytics"))
 (defn- analytics-list [client path params opts]
   (dynamic-list (reduce dynamic-call (analytics client) path)
                 (->dynamic-params params (or opts {}))))
+(defn- beta-analytics-list [client path params opts]
+  (dynamic-list (reduce dynamic-call (dynamic-call (beta-organization client) "analytics") path)
+                (->dynamic-params params (or opts {}))))
 
 (defn list-analytics-summaries [client opts]
-  (with-api-errors (analytics-list client ["summaries"] "com.anthropic.models.beta.organization.analytics.summaries.SummaryListParams" opts)))
+  (with-api-errors (analytics-list client ["summaries"] SummaryListParams opts)))
 (defn list-analytics-users
   ([client] (list-analytics-users client {}))
-  ([client opts] (with-api-errors (analytics-list client ["users"] "com.anthropic.models.beta.organization.analytics.users.UserListParams" opts))))
+  ([client opts] (with-api-errors (analytics-list client ["users"] UserListParams opts))))
 (defn list-analytics-chat-projects
   ([client] (list-analytics-chat-projects client {}))
-  ([client opts] (with-api-errors (analytics-list client ["apps" "chat" "projects"] "com.anthropic.models.beta.organization.analytics.apps.chat.projects.ProjectListParams" opts))))
+  ([client opts] (with-api-errors (analytics-list client ["apps" "chat" "projects"] ProjectListParams opts))))
 (defn list-analytics-connectors
   ([client] (list-analytics-connectors client {}))
-  ([client opts] (with-api-errors (analytics-list client ["connectors"] "com.anthropic.models.beta.organization.analytics.connectors.ConnectorListParams" opts))))
+  ([client opts] (with-api-errors (analytics-list client ["connectors"] ConnectorListParams opts))))
 (defn list-analytics-plugins
   ([client] (list-analytics-plugins client {}))
-  ([client opts] (with-api-errors (analytics-list client ["plugins"] "com.anthropic.models.beta.organization.analytics.plugins.PluginListParams" opts))))
+  ([client opts] (with-api-errors (analytics-list client ["plugins"] PluginListParams opts))))
 (defn list-analytics-skills
   ([client] (list-analytics-skills client {}))
-  ([client opts] (with-api-errors (analytics-list client ["skills"] "com.anthropic.models.beta.organization.analytics.skills.SkillListParams" opts))))
+  ([client opts] (with-api-errors (analytics-list client ["skills"] SkillListParams opts))))
 (defn list-analytics-artifacts [client opts]
-  (with-api-errors (analytics-list client ["artifacts"] "com.anthropic.models.beta.organization.analytics.artifacts.ArtifactListParams" opts)))
+  (with-api-errors (analytics-list client ["artifacts"] ArtifactListParams opts)))
 (defn list-analytics-usage-report [client opts]
-  (with-api-errors (analytics-list client ["usageReport"] "com.anthropic.models.beta.organization.analytics.usagereport.UsageReportListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["usageReport"] "com.anthropic.models.beta.organization.analytics.usagereport.UsageReportListParams" opts)))
 (defn list-analytics-user-usage-report [client opts]
-  (with-api-errors (analytics-list client ["userUsageReport"] "com.anthropic.models.beta.organization.analytics.userusagereport.UserUsageReportListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["userUsageReport"] "com.anthropic.models.beta.organization.analytics.userusagereport.UserUsageReportListParams" opts)))
 (defn list-analytics-cost-report [client opts]
-  (with-api-errors (analytics-list client ["costReport"] "com.anthropic.models.beta.organization.analytics.costreport.CostReportListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["costReport"] "com.anthropic.models.beta.organization.analytics.costreport.CostReportListParams" opts)))
 (defn list-analytics-user-cost-report [client opts]
-  (with-api-errors (analytics-list client ["userCostReport"] "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["userCostReport"] "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListParams" opts)))
 (defn list-analytics-usage
   "List token-usage analytics buckets. Requires `:starting-at` (an ISO-8601
   instant). Options include `:ending-at`, `:time-bucket-width` (`:minute`/
@@ -1356,14 +1378,14 @@
   `:exclude-deleted-users`, `:order`, `:order-by`, `:limit`, and `:page`."
   [client opts]
   (when-not (:starting-at opts) (missing-key! :starting-at))
-  (with-api-errors (analytics-list client ["usage"] "com.anthropic.models.beta.organization.analytics.usage.UsageListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["usage"] "com.anthropic.models.beta.organization.analytics.usage.UsageListParams" opts)))
 (defn list-analytics-cost
   "List cost analytics buckets. Takes the same options as
   `list-analytics-usage`; `:group-by` also accepts `:cost-type` and
   `:token-type`, and `:order-by` is `:amount`, `:list-amount`, or `:time`."
   [client opts]
   (when-not (:starting-at opts) (missing-key! :starting-at))
-  (with-api-errors (analytics-list client ["cost"] "com.anthropic.models.beta.organization.analytics.cost.CostListParams" opts)))
+  (with-api-errors (beta-analytics-list client ["cost"] "com.anthropic.models.beta.organization.analytics.cost.CostListParams" opts)))
 
 (defn- admin-service
   "The beta organization service at `service`: one accessor name, or a path
@@ -1378,18 +1400,81 @@
   (dynamic-list (admin-service client service)
                 (->dynamic-params params (or opts {}))))
 
+(defn- stable-admin-service [client service]
+  (reduce dynamic-call (stable-organization client)
+          (if (string? service) [service] service)))
+(defn- stable-admin-call [client service method params opts]
+  (obj->clj (dynamic-call (stable-admin-service client service)
+                          method (->dynamic-params params opts))))
+(defn- stable-admin-list [client service params opts]
+  (dynamic-list (stable-admin-service client service)
+                (->dynamic-params params (or opts {}))))
+
 (defn get-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "retrieve" "com.anthropic.models.beta.organization.spendlimits.SpendLimitRetrieveParams" {:spend-limit-id id})))
 (defn list-spend-limits ([client] (list-spend-limits client {})) ([client opts] (with-api-errors (admin-list client "spendLimits" "com.anthropic.models.beta.organization.spendlimits.SpendLimitListParams" opts))))
 (defn delete-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "delete" "com.anthropic.models.beta.organization.spendlimits.SpendLimitDeleteParams" {:spend-limit-id id})))
 (defn set-spend-limit [client changes] (with-api-errors (admin-call client "spendLimits" "set" "com.anthropic.models.beta.organization.spendlimits.SpendLimitSetParams" changes)))
 
-(defn create-rbac-group [client changes] (with-api-errors (admin-call client "rbacGroups" "create" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupCreateParams" changes)))
-(defn get-rbac-group [client id] (with-api-errors (admin-call client "rbacGroups" "retrieve" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupRetrieveParams" {:rbac-group-id id})))
-(defn update-rbac-group [client id changes] (with-api-errors (admin-call client "rbacGroups" "update" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupUpdateParams" (assoc changes :rbac-group-id id))))
-(defn list-rbac-groups ([client] (list-rbac-groups client {})) ([client opts] (with-api-errors (admin-list client "rbacGroups" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupListParams" opts))))
-(defn delete-rbac-group [client id] (with-api-errors (admin-call client "rbacGroups" "delete" "com.anthropic.models.beta.organization.rbacgroups.RbacGroupDeleteParams" {:rbac-group-id id})))
-(defn get-rbac-role [client id] (with-api-errors (admin-call client "rbacRoles" "retrieve" "com.anthropic.models.beta.organization.rbacroles.RbacRoleRetrieveParams" {:rbac-role-id id})))
-(defn list-rbac-roles ([client] (list-rbac-roles client {})) ([client opts] (with-api-errors (admin-list client "rbacRoles" "com.anthropic.models.beta.organization.rbacroles.RbacRoleListParams" opts))))
+(defn create-rbac-group [client changes] (with-api-errors (stable-admin-call client "rbacGroups" "create" RbacGroupCreateParams changes)))
+(defn get-rbac-group [client id] (with-api-errors (stable-admin-call client "rbacGroups" "retrieve" RbacGroupRetrieveParams {:rbac-group-id id})))
+(defn update-rbac-group [client id changes] (with-api-errors (stable-admin-call client "rbacGroups" "update" RbacGroupUpdateParams (assoc changes :rbac-group-id id))))
+(defn list-rbac-groups ([client] (list-rbac-groups client {})) ([client opts] (with-api-errors (stable-admin-list client "rbacGroups" RbacGroupListParams opts))))
+(defn delete-rbac-group [client id] (with-api-errors (stable-admin-call client "rbacGroups" "delete" RbacGroupDeleteParams {:rbac-group-id id})))
+(defn get-rbac-role [client id] (with-api-errors (stable-admin-call client "rbacRoles" "retrieve" RbacRoleRetrieveParams {:rbac-role-id id})))
+(defn list-rbac-roles ([client] (list-rbac-roles client {})) ([client opts] (with-api-errors (stable-admin-list client "rbacRoles" RbacRoleListParams opts))))
+
+(defn add-rbac-group-member [client rbac-group-id changes]
+  (when-not rbac-group-id (missing-key! :rbac-group-id))
+  (when-not (:user-id changes) (missing-key! :user-id))
+  (with-api-errors (stable-admin-call client ["rbacGroups" "members"] "add"
+                                     MemberAddParams
+                                     (assoc changes :rbac-group-id rbac-group-id))))
+(defn list-rbac-group-members
+  ([client rbac-group-id] (list-rbac-group-members client rbac-group-id {}))
+  ([client rbac-group-id opts]
+   (when-not rbac-group-id (missing-key! :rbac-group-id))
+   (with-api-errors (stable-admin-list client ["rbacGroups" "members"]
+                                       MemberListParams
+                                       (assoc opts :rbac-group-id rbac-group-id)))))
+(defn remove-rbac-group-member [client rbac-group-id user-id]
+  (when-not rbac-group-id (missing-key! :rbac-group-id))
+  (when-not user-id (missing-key! :user-id))
+  (with-api-errors (stable-admin-call client ["rbacGroups" "members"] "remove"
+                                     MemberRemoveParams
+                                     {:rbac-group-id rbac-group-id :user-id user-id})))
+(defn list-rbac-role-permissions
+  ([client rbac-role-id] (list-rbac-role-permissions client rbac-role-id {}))
+  ([client rbac-role-id opts]
+   (when-not rbac-role-id (missing-key! :rbac-role-id))
+   (with-api-errors (stable-admin-list client ["rbacRoles" "permissions"]
+                                       PermissionListParams
+                                       (assoc opts :rbac-role-id rbac-role-id)))))
+(defn list-effective-spend-limits
+  ([client] (list-effective-spend-limits client {}))
+  ([client opts] (with-api-errors (stable-admin-list client ["spendLimits" "effective"]
+                                                   EffectiveListParams opts))))
+(defn list-spend-limit-increase-requests
+  ([client] (list-spend-limit-increase-requests client {}))
+  ([client opts] (with-api-errors (stable-admin-list client ["spendLimits" "increaseRequests"]
+                                                   IncreaseRequestListParams opts))))
+(defn get-spend-limit-increase-request [client id]
+  (when-not id (missing-key! :spend-limit-increase-request-id))
+  (with-api-errors (stable-admin-call client ["spendLimits" "increaseRequests"] "retrieve"
+                                      IncreaseRequestRetrieveParams
+                                      {:spend-limit-increase-request-id id})))
+(defn approve-spend-limit-increase-request [client id changes]
+  (when-not id (missing-key! :spend-limit-increase-request-id))
+  (when-not (:amount changes) (missing-key! :amount))
+  (with-api-errors (stable-admin-call client ["spendLimits" "increaseRequests"] "approve"
+                                      IncreaseRequestApproveParams
+                                      (assoc changes :spend-limit-increase-request-id id))))
+(defn deny-spend-limit-increase-request
+  ([client id] (deny-spend-limit-increase-request client id {}))
+  ([client id changes]
+   (when-not id (missing-key! :spend-limit-increase-request-id))
+   (with-api-errors (stable-admin-call client ["spendLimits" "increaseRequests"] "deny"
+                                      IncreaseRequestDenyParams
+                                      (assoc changes :spend-limit-increase-request-id id)))))
 
 (defn create-plugin [client changes] (with-api-errors (admin-call client "plugins" "create" "com.anthropic.models.beta.organization.plugins.PluginCreateParams" changes)))
 (defn get-plugin [client id] (with-api-errors (admin-call client "plugins" "retrieve" "com.anthropic.models.beta.organization.plugins.PluginRetrieveParams" {:plugin-id id})))

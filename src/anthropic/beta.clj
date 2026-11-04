@@ -108,9 +108,11 @@
                                                SessionUpdateParams$Builder
                                                SessionUpdateParams$Metadata)
            (com.anthropic.models.beta.sessions.events BetaManagedAgentsEventParams
+                                                       BetaManagedAgentsCompactionLimitReachedError
                                                        BetaManagedAgentsFileRubricParams
                                                        BetaManagedAgentsSendSessionEvents
                                                        BetaManagedAgentsSessionEvent
+                                                       BetaManagedAgentsToolUseLimitReachedError
                                                        BetaManagedAgentsTextBlock
                                                        BetaManagedAgentsTextRubricParams
                                                        BetaManagedAgentsUserDefineOutcomeEvent
@@ -2499,10 +2501,18 @@
                         :message (.message error)}
                  (unopt (.mcpServerName error)) (assoc :mcp-server-name (unopt (.mcpServerName error)))
                  (unopt (.repositoryUrl error)) (assoc :repository-url (unopt (.repositoryUrl error))))]
-    {:error (if (.isRepositoryClone error)
-              (assoc result :retry-status
-                     (->keyword (.asString (.type (.retryStatus (.asRepositoryClone error))))))
-              result)}))
+    {:error (cond
+              (.isRepositoryClone error)
+              (let [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsRepositoryCloneError e
+                    (.asRepositoryClone error)]
+                (assoc result :retry-status (->keyword (.asString (.type (.retryStatus e))))))
+              (.isToolUseLimitReached error)
+              (let [^BetaManagedAgentsToolUseLimitReachedError e (.asToolUseLimitReached error)]
+                (assoc result :retry-status (->keyword (.asString (.type (.retryStatus e))))))
+              (.isCompactionLimitReached error)
+              (let [^BetaManagedAgentsCompactionLimitReachedError e (.asCompactionLimitReached error)]
+                (assoc result :retry-status (->keyword (.asString (.type (.retryStatus e))))))
+              :else result)}))
 
 (defn- session-rubric->map
   [^com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserDefineOutcomeEvent$Rubric rubric]

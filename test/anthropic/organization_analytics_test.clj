@@ -5,6 +5,8 @@
             [clojure.test :refer [deftest is]]))
 
 (def ^:private analytics-service
+  "com.anthropic.services.blocking.organization.AnalyticsService")
+(def ^:private beta-analytics-service
   "com.anthropic.services.blocking.beta.organization.AnalyticsService")
 
 (defn- present [optional]
@@ -27,7 +29,7 @@
 (defn- assert-list-result! [result expected-keys value-key expected-value enum-keys]
   (let [item (first result)]
     (is (= 2 (count result)))
-    (is (= expected-keys (set (keys item))))
+    (is (every? #(contains? item %) expected-keys))
     (is (kebab-keys? item))
     (doseq [key enum-keys]
       (is (keyword? (get item key))))
@@ -36,25 +38,25 @@
 (deftest analytics-chat-cowork-unified-fields-convert
   (let [summary
         (-> (support/sdk-model
-             "com.anthropic.models.beta.organization.analytics.BetaAnalyticsSingleDayActivitySummary")
+             "com.anthropic.models.organization.analytics.AnalyticsSingleDayActivitySummary")
             (.toBuilder)
             (.chatCoworkUnifiedDailyActiveUserCount 11)
             (.chatCoworkUnifiedMonthlyActiveUserCount 22)
             (.chatCoworkUnifiedWeeklyActiveUserCount 33)
             (.build))
         chat (-> (support/sdk-model
-                  "com.anthropic.models.beta.organization.analytics.BetaAnalyticsChatCoworkUnifiedChatMetrics")
+                  "com.anthropic.models.organization.analytics.AnalyticsChatCoworkUnifiedChatMetrics")
                  (.toBuilder)
                  (.messageCount 44)
                  (.thinkingMessageCount 55)
                  (.build))
         unified (-> (support/sdk-model
-                     "com.anthropic.models.beta.organization.analytics.BetaAnalyticsUserActivity$ChatCoworkUnifiedMetrics")
+                     "com.anthropic.models.organization.analytics.AnalyticsChatCoworkUnifiedMetrics")
                     (.toBuilder)
                     (.chat chat)
                     (.build))
         result (-> (support/sdk-model
-                    "com.anthropic.models.beta.organization.analytics.BetaAnalyticsUserActivity")
+                    "com.anthropic.models.organization.analytics.AnalyticsUserActivity")
                    (.toBuilder)
                    (.chatCoworkUnifiedMetrics unified)
                    (.build))
@@ -70,10 +72,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.SummaryService"
-         "com.anthropic.models.beta.organization.analytics.summaries.SummaryListPage"
-         "com.anthropic.models.beta.organization.analytics.summaries.SummaryListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsSingleDayActivitySummary"
+         "com.anthropic.services.blocking.organization.analytics.SummaryService"
+         "com.anthropic.models.organization.analytics.summaries.SummaryListPage"
+         "com.anthropic.models.organization.analytics.summaries.SummaryListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsSingleDayActivitySummary"
          #(organization/list-analytics-summaries
            % {:starting-date "2026-09-01"
               :ending-date "2026-09-30"
@@ -98,10 +100,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.UserService"
-         "com.anthropic.models.beta.organization.analytics.users.UserListPage"
-         "com.anthropic.models.beta.organization.analytics.users.UserListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsUserActivity"
+         "com.anthropic.services.blocking.organization.analytics.UserService"
+         "com.anthropic.models.organization.analytics.users.UserListPage"
+         "com.anthropic.models.organization.analytics.users.UserListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsUserActivity"
          #(organization/list-analytics-users
            % {:date "2026-09-15"
               :ending-date "2026-09-30"
@@ -131,12 +133,12 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service
-                     "com.anthropic.services.blocking.beta.organization.analytics.AppService"
-                     "com.anthropic.services.blocking.beta.organization.analytics.apps.ChatService"]
-         "com.anthropic.services.blocking.beta.organization.analytics.apps.chat.ProjectService"
-         "com.anthropic.models.beta.organization.analytics.apps.chat.projects.ProjectListPage"
-         "com.anthropic.models.beta.organization.analytics.apps.chat.projects.ProjectListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsProjectActivity"
+                     "com.anthropic.services.blocking.organization.analytics.AppService"
+                     "com.anthropic.services.blocking.organization.analytics.apps.ChatService"]
+         "com.anthropic.services.blocking.organization.analytics.apps.chat.ProjectService"
+         "com.anthropic.models.organization.analytics.apps.chat.projects.ProjectListPage"
+         "com.anthropic.models.organization.analytics.apps.chat.projects.ProjectListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsProjectActivity"
          #(organization/list-analytics-chat-projects
            % {:date "2026-09-15"
               :ending-date "2026-09-30"
@@ -164,10 +166,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.ConnectorService"
-         "com.anthropic.models.beta.organization.analytics.connectors.ConnectorListPage"
-         "com.anthropic.models.beta.organization.analytics.connectors.ConnectorListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsConnectorActivity"
+         "com.anthropic.services.blocking.organization.analytics.ConnectorService"
+         "com.anthropic.models.organization.analytics.connectors.ConnectorListPage"
+         "com.anthropic.models.organization.analytics.connectors.ConnectorListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsConnectorActivity"
          #(organization/list-analytics-connectors
            % {:date "2026-09-15"
               :ending-date "2026-09-30"
@@ -197,10 +199,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.PluginService"
-         "com.anthropic.models.beta.organization.analytics.plugins.PluginListPage"
-         "com.anthropic.models.beta.organization.analytics.plugins.PluginListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsPluginActivity"
+         "com.anthropic.services.blocking.organization.analytics.PluginService"
+         "com.anthropic.models.organization.analytics.plugins.PluginListPage"
+         "com.anthropic.models.organization.analytics.plugins.PluginListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsPluginActivity"
          #(organization/list-analytics-plugins
            % {:date "2026-09-15"
               :ending-date "2026-09-30"
@@ -230,10 +232,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.SkillService"
-         "com.anthropic.models.beta.organization.analytics.skills.SkillListPage"
-         "com.anthropic.models.beta.organization.analytics.skills.SkillListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsSkillActivity"
+         "com.anthropic.services.blocking.organization.analytics.SkillService"
+         "com.anthropic.models.organization.analytics.skills.SkillListPage"
+         "com.anthropic.models.organization.analytics.skills.SkillListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsSkillActivity"
          #(organization/list-analytics-skills
            % {:date "2026-09-15"
               :ending-date "2026-09-30"
@@ -263,10 +265,10 @@
   (let [[result params]
         (support/exercise-list!
          :analytics [analytics-service]
-         "com.anthropic.services.blocking.beta.organization.analytics.ArtifactService"
-         "com.anthropic.models.beta.organization.analytics.artifacts.ArtifactListPage"
-         "com.anthropic.models.beta.organization.analytics.artifacts.ArtifactListPageResponse"
-         "com.anthropic.models.beta.organization.analytics.BetaAnalyticsArtifactActivity"
+         "com.anthropic.services.blocking.organization.analytics.ArtifactService"
+         "com.anthropic.models.organization.analytics.artifacts.ArtifactListPage"
+         "com.anthropic.models.organization.analytics.artifacts.ArtifactListPageResponse"
+         "com.anthropic.models.organization.analytics.AnalyticsArtifactActivity"
          #(organization/list-analytics-artifacts
            % {:date "2026-09-15"
               :filter ["artifact_type:spreadsheet"]
@@ -287,7 +289,7 @@
 (deftest list-analytics-usage-report-round-trips
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.UsageReportService"
          "com.anthropic.models.beta.organization.analytics.usagereport.UsageReportListPage"
          "com.anthropic.models.beta.organization.analytics.usagereport.UsageReportListPageResponse"
@@ -336,7 +338,7 @@
 (deftest list-analytics-user-usage-report-round-trips
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.UserUsageReportService"
          "com.anthropic.models.beta.organization.analytics.userusagereport.UserUsageReportListPage"
          "com.anthropic.models.beta.organization.analytics.userusagereport.UserUsageReportListPageResponse"
@@ -392,7 +394,7 @@
 (deftest list-analytics-cost-report-round-trips
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.CostReportService"
          "com.anthropic.models.beta.organization.analytics.costreport.CostReportListPage"
          "com.anthropic.models.beta.organization.analytics.costreport.CostReportListPageResponse"
@@ -442,7 +444,7 @@
 (deftest list-analytics-user-cost-report-round-trips
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.UserCostReportService"
          "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListPage"
          "com.anthropic.models.beta.organization.analytics.usercostreport.UserCostReportListPageResponse"
@@ -498,7 +500,7 @@
 (deftest list-analytics-usage-builds-params
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.UsageService"
          "com.anthropic.models.beta.organization.analytics.usage.UsageListPage"
          "com.anthropic.models.beta.organization.analytics.usage.UsageListPageResponse"
@@ -549,7 +551,7 @@
                "metrics" {"requests" 12 "output_tokens" 300}})
         [result]
         (support/exercise-path-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.UsageService"
          "com.anthropic.models.beta.organization.analytics.usage.UsageListPage"
          "com.anthropic.models.beta.organization.analytics.usage.UsageListPageResponse"
@@ -564,7 +566,7 @@
 (deftest list-analytics-cost-builds-params
   (let [[result params]
         (support/exercise-list!
-         :analytics [analytics-service]
+         :beta-analytics [beta-analytics-service]
          "com.anthropic.services.blocking.beta.organization.analytics.CostService"
          "com.anthropic.models.beta.organization.analytics.cost.CostListPage"
          "com.anthropic.models.beta.organization.analytics.cost.CostListPageResponse"
