@@ -8,6 +8,8 @@
            (java.time LocalDate OffsetDateTime)
            (java.util Optional)))
 
+(declare proxy-service)
+
 (defn proxy-service
   "Builds an implementation of interface that sends method name and args to handler."
   [interface handler]
@@ -21,11 +23,22 @@
   "Builds a beta client whose organization services are supplied by services map."
   [services]
   (reify AnthropicClient
+    ;; 3.4 promotes these administration services to the stable organization
+    ;; surface.  Keep this fixture useful to the remaining beta tests while
+    ;; making promoted-operation tests exercise the stable client route.
+    (organization [_]
+      (proxy-service
+       (Class/forName "com.anthropic.services.blocking.OrganizationService")
+       (fn [method _]
+         (get services ({"analytics" :analytics
+                         "spendLimits" :spend-limits
+                         "rbacGroups" :rbac-groups
+                         "rbacRoles" :rbac-roles} method)))))
     (beta [_]
       (reify BetaService
         (organization [_]
           (reify OrganizationService
-            (analytics [_] (:analytics services))
+            (analytics [_] (or (:beta-analytics services) (:analytics services)))
             (spendLimits [_] (:spend-limits services))
             (rbacGroups [_] (:rbac-groups services))
             (rbacRoles [_] (:rbac-roles services))
@@ -128,7 +141,7 @@
   (proxy-service (Class/forName interface)
                  (fn [method args]
                    (when (contains? #{"create" "retrieve" "update" "delete" "set" "list" "remove"
-                                      "add" "test" "regenerateSigningSecret"
+                                      "add" "approve" "deny" "test" "regenerateSigningSecret"
                                       "validateArchive" "validateRepository"} method)
                      (reset! captured (first args)))
                    (if (fn? response) (response args) response))))

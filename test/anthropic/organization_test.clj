@@ -147,6 +147,7 @@
                       (.externalKeyId (Optional/empty))
                       (.name "US workspace")
                       (.tags (.build (Workspace$Tags/builder)))
+                      (.userProfileId "usr_profile_1")
                       .build)]
     (is (= {:allowed-inference-geos [:global :us]
             :default-inference-geo :global
@@ -200,6 +201,10 @@
                 remove-federation-rule-workspace
                 update-workspace-rate-limit update-beta-workspace-rate-limit
                 list-analytics-usage list-analytics-cost
+                add-rbac-group-member list-rbac-group-members remove-rbac-group-member
+                list-rbac-role-permissions list-effective-spend-limits
+                list-spend-limit-increase-requests get-spend-limit-increase-request
+                approve-spend-limit-increase-request deny-spend-limit-increase-request
                 list-claude-tag-bundles get-claude-tag-bundle
                 create-claude-tag-bundle-target get-claude-tag-bundle-target
                 list-claude-tag-bundle-targets delete-claude-tag-bundle-target
@@ -222,8 +227,8 @@
 (deftest get-rbac-group-round-trips-params-and-response
   (let [[result params]
         (support/exercise-single! :rbac-groups
-                          "com.anthropic.services.blocking.beta.organization.RbacGroupService"
-                          "com.anthropic.models.beta.organization.rbacgroups.BetaRbacGroup"
+                          "com.anthropic.services.blocking.organization.RbacGroupService"
+                          "com.anthropic.models.organization.rbacgroups.RbacGroup"
                           #(anthropic.organization/get-rbac-group % "grp_42"))]
     (is (= "grp_42" (.orElse (.rbacGroupId params) nil)))
     (is (= "stub" (:id result)))

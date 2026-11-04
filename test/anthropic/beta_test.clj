@@ -24,7 +24,10 @@
                                                        BetaManagedAgentsRepositoryCloneError
                                                        BetaManagedAgentsRepositoryNotFoundError
                                                        BetaManagedAgentsRetryStatusTerminal
+                                                       BetaManagedAgentsToolUseLimitReachedError
+                                                       BetaManagedAgentsCompactionLimitReachedError
                                                        BetaManagedAgentsSessionErrorEvent
+                                                       BetaManagedAgentsSessionErrorEvent$Error
                                                        BetaManagedAgentsSendSessionEvents
                                                        BetaManagedAgentsSessionEvent
                                                        BetaManagedAgentsSessionRefusal
@@ -748,6 +751,30 @@
             :retry-status :terminal}
            (:error (session-event->map
                     (BetaManagedAgentsSessionEvent/ofSessionError event)))))))
+
+(deftest session-limit-errors-include-retry-status
+  (doseq [[kind error-class retry-class error-fn]
+          [[:tool-use-limit-reached-error
+            BetaManagedAgentsToolUseLimitReachedError
+            com.anthropic.models.beta.sessions.events.BetaManagedAgentsToolUseLimitReachedError$RetryStatus
+            #(BetaManagedAgentsSessionErrorEvent$Error/ofToolUseLimitReached %)]
+           [:compaction-limit-reached-error
+            BetaManagedAgentsCompactionLimitReachedError
+            com.anthropic.models.beta.sessions.events.BetaManagedAgentsCompactionLimitReachedError$RetryStatus
+            #(BetaManagedAgentsSessionErrorEvent$Error/ofCompactionLimitReached %)]]]
+    (let [retry (-> (BetaManagedAgentsRetryStatusTerminal/builder)
+                    (.type (JsonValue/from "terminal")) (.build))
+          error (-> (.invoke (.getMethod error-class "builder" (make-array Class 0)) nil (object-array 0))
+                    (.message "limit reached")
+                    (.retryStatus (.invoke (.getMethod retry-class "ofTerminal" (into-array Class [BetaManagedAgentsRetryStatusTerminal])) nil (object-array [retry])))
+                    (.type (JsonValue/from (name kind)))
+                    (.build))
+          event (-> (BetaManagedAgentsSessionErrorEvent/builder)
+                    (.id "evt_limit") (.error (error-fn error))
+                    (.processedAt (java.time.OffsetDateTime/parse "2026-09-30T00:00:00Z"))
+                    (.type (JsonValue/from "session_error")) (.build))]
+      (is (= {:type kind :message "limit reached" :retry-status :terminal}
+             (:error (session-event->map (BetaManagedAgentsSessionEvent/ofSessionError event))))))))
 
 (deftest session-repository-not-found-error-is-a-keyworded-map
   (let [repository-error (-> (BetaManagedAgentsRepositoryNotFoundError/builder)
