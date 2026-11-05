@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.45.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.46.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.45.0"]
+[net.clojars.savya/anthropic-clj "0.46.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -62,7 +62,7 @@ OpenTelemetry tracing is reachable through `:configure`, for example
 settings are reachable with the SDK's `(.withOptions client consumer)` on a
 built client. This library adds no OpenTelemetry dependency.
 
-Tracks [`com.anthropic/anthropic-java` 3.4.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.4.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 3.5.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.5.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -483,7 +483,8 @@ All failures throw `ex-info` keyed `:anthropic/error` in `ex-data`:
   `:unauthorized`, `:permission-denied`, `:not-found`,
   `:unprocessable-entity`, `:rate-limit`, `:internal-server`, or
   `:unexpected-status`. The library keeps the original SDK exception as
-  `(ex-cause e)`.
+  `(ex-cause e)`. Typed API failures also carry `:error-details` as a
+  kebab-case map with keyword enums.
 - Network and IO failures carry `{:anthropic/error :io-error}`. The original
   exception is the cause.
 
@@ -581,6 +582,7 @@ keyword enums.
 - Workspace rate limits: `list-workspace-rate-limits`,
   `update-workspace-rate-limit` (`{:limits [{:type :requests-per-minute :value 100}]}`),
   and the beta twin `update-beta-workspace-rate-limit`
+- Workspaces: `list-workspaces` accepts `:ids` to filter by workspace ID
 - Spend limits: `list-spend-limits` takes `:workspace-id` and `:scope-type`
   (including `:usage-tier`); spend-limit maps report usage-tier scopes
 - Stable spend-limit administration: `list-effective-spend-limits` and

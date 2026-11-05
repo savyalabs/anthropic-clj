@@ -1960,16 +1960,66 @@
 (def throw-normalized! #'a/throw-normalized!)
 
 (defn- rate-limit-ex ^com.anthropic.errors.RateLimitException []
-  (let [ctor (first (.getConstructors com.anthropic.errors.RateLimitException))]
-    (.newInstance ctor (object-array [(-> (com.anthropic.core.http.Headers/builder)
-                                          (.put "request-id" "req_123")
-                                          (.put "retry-after" "1")
-                                          (.build))
-                                      (com.anthropic.core.JsonValue/from
-                                       {"type" "error"
-                                        "error" {"type" "rate_limit_error"
-                                                 "message" "slow down"}})
-                                      nil nil]))))
+  (-> (com.anthropic.errors.RateLimitException/builder)
+      (.headers (-> (com.anthropic.core.http.Headers/builder)
+                    (.put "request-id" "req_123")
+                    (.put "retry-after" "1")
+                    (.build)))
+      (.body (com.anthropic.core.JsonValue/from
+              {"type" "error"
+               "error" {"type" "rate_limit_error"
+                        "message" "slow down"}}))
+      (.build)))
+
+(defn- service-ex [exception-class error]
+  (let [headers (.build (com.anthropic.core.http.Headers/builder))
+        body (com.anthropic.core.JsonValue/from {"type" "error" "error" error})]
+    (.build (.body (.headers (clojure.lang.Reflector/invokeStaticMethod
+                              exception-class "builder" (object-array 0)) headers)
+                   body))))
+
+(defn- normalize [e]
+  (try (throw-normalized! e) (catch clojure.lang.ExceptionInfo e e)))
+
+(deftest typed-error-details-in-ex-data
+  (testing "typed SDK details become a kebab-case map"
+    (let [ex (normalize
+              (service-ex com.anthropic.models.organization.invites.AlreadyMemberException
+                          {"type" "invalid_request_error"
+                           "details" {"error_code" "already_member"}}))]
+      (is (= {:error-code "already_member"}
+             (:error-details (ex-data ex))))))
+  (testing "nested lease state converts its enum"
+    (let [ex (normalize
+              (service-ex com.anthropic.models.beta.environments.work.BetaHeartbeatPreconditionFailedException
+                          {"type" "memory_precondition_failed_error"
+                           "details" {"error_code" "heartbeat_precondition_failed"
+                                      "current_state" {"state" "active"
+                                                       "lease_extended" true
+                                                       "ttl_seconds" 30
+                                                       "last_heartbeat" "2026-11-04T00:00:00Z"}}}))]
+      (is (= {:error-code "heartbeat_precondition_failed"
+              :current-state {:state :active
+                              :lease-extended true
+                              :ttl-seconds 30
+                              :last-heartbeat "2026-11-04T00:00:00Z"}}
+             (:error-details (ex-data ex)))))))
+
+(deftest untyped-error-has-no-error-details
+  (let [ex (normalize
+            (service-ex com.anthropic.errors.BadRequestException
+                        {"type" "invalid_request_error"}))]
+    (is (not (contains? (ex-data ex) :error-details)))))
+
+(deftest sdk-error-type-new-values
+  (doseq [[wire expected] [["conflict_error" :conflict-error]
+                           ["memory_path_conflict_error" :memory-path-conflict-error]
+                           ["memory_precondition_failed_error" :memory-precondition-failed-error]]]
+    (is (= expected
+           (:sdk-error-type
+            (ex-data (normalize
+                      (service-ex com.anthropic.errors.BadRequestException
+                                  {"type" wire}))))))))
 
 (deftest api-error-normalization
   (testing "service exceptions become ex-info with status, error-type, and the original as cause"

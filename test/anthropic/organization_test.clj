@@ -31,6 +31,16 @@
     (is (= false (.orElse (.includeDefault false-params) nil)))
     (is (= nil (.orElse (.includeDefault absent-params) nil)))))
 
+(deftest list-workspaces-ids-filter-reaches-params
+  (let [build-params (private-fn '->workspace-list-params)
+        beta-params (private-fn '->dynamic-params)
+        params (build-params {:ids ["ws_1" "ws_2"]})
+        beta (beta-params
+              "com.anthropic.models.beta.organization.workspaces.WorkspaceListParams"
+              {:ids ["ws_1" "ws_2"]})]
+    (is (= ["ws_1" "ws_2"] (vec (.orElse (.ids params) nil))))
+    (is (= ["ws_1" "ws_2"] (vec (.orElse (.ids beta) nil))))))
+
 (deftest workspace-rate-limit-list-params-support-inherited-rates
   (let [build-params (private-fn '->workspace-rate-limit-list-params)]
     (is (some? build-params))

@@ -846,18 +846,19 @@
 
 (defn- ->workspace-list-params
   ^com.anthropic.models.organization.workspaces.WorkspaceListParams
-  [{:keys [limit after-id before-id include-archived include-default]}]
+  [{:keys [limit after-id before-id ids include-archived include-default]}]
   (let [^com.anthropic.models.organization.workspaces.WorkspaceListParams$Builder b
         (com.anthropic.models.organization.workspaces.WorkspaceListParams/builder)]
     (when limit (.limit b (long limit)))
     (when after-id (.afterId b ^String after-id))
     (when before-id (.beforeId b ^String before-id))
+    (when ids (.ids b ^java.util.List (mapv str ids)))
     (when (some? include-archived) (.includeArchived b (boolean include-archived)))
     (when (some? include-default) (.includeDefault b (boolean include-default)))
     (.build b)))
 
 (defn list-workspaces
-  "List workspaces. Options: `:limit`, `:after-id`, `:before-id`,
+  "List workspaces. Options: `:limit`, `:after-id`, `:before-id`, `:ids`,
   `:include-archived`, and `:include-default`."
   ([^AnthropicClient client] (list-workspaces client {}))
   ([^AnthropicClient client opts]
