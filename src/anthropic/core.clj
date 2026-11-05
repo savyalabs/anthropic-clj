@@ -171,7 +171,7 @@
                                  UnexpectedStatusCodeException
                                  UnprocessableEntityException)))
 
-(declare headers->map json->clj ->keyword)
+(declare headers->map json->clj ->keyword error-details->map)
 
 (def models
   "Keyword aliases for the SDK's named models. Any raw model-id string is still accepted."
@@ -365,7 +365,14 @@
     (instance? AnthropicServiceException e)
     (let [se ^AnthropicServiceException e
           headers (headers->map (.headers se))
-          sdk-type (.errorType se)]
+          sdk-type (.errorType se)
+          details (when (.isPresent (.errorDetails se))
+                    (let [common-details (.get (.errorDetails se))]
+                      (error-details->map
+                       (try
+                         (clojure.lang.Reflector/invokeInstanceMethod
+                          e "details" (object-array 0))
+                         (catch Throwable _ common-details)))))]
       (throw (ex-info (or (.getMessage e) "Anthropic API error")
                       (cond-> {:anthropic/error :api-error
                                :status (.statusCode se)
@@ -379,7 +386,9 @@
                         (.isPresent sdk-type)
                         (assoc :sdk-error-type
                                (->keyword (.asString ^com.anthropic.models.ErrorType
-                                                     (.get sdk-type)))))
+                                                     (.get sdk-type))))
+                        (some? details)
+                        (assoc :error-details details))
                       e)))
     (instance? AnthropicIoException e)
     (throw (ex-info (or (.getMessage e) "Anthropic I/O error")
@@ -1378,6 +1387,44 @@
 
 (defn- json->clj [^JsonValue jv]
   (java->clj (.convert jv java.lang.Object)))
+
+(defn- kebab-keys [value]
+  (cond
+    (map? value) (into {}
+                        (map (fn [[k v]]
+                               [(-> k name (str/replace "_" "-") keyword)
+                                (kebab-keys v)]))
+                        value)
+    (sequential? value) (mapv kebab-keys value)
+    :else value))
+
+(defn- enum-keywords [o value]
+  (cond
+    (instance? com.anthropic.core.Enum o)
+    (->keyword (clojure.lang.Reflector/invokeInstanceMethod o "asString" (object-array 0)))
+    (instance? java.util.Optional o)
+    (when (.isPresent ^java.util.Optional o)
+      (enum-keywords (.get ^java.util.Optional o) value))
+    (instance? java.util.List o) (mapv enum-keywords o value)
+    (and (some? o) (map? value)
+         (.startsWith (.getName (class o)) "com.anthropic.models."))
+    (reduce (fn [m ^java.lang.reflect.Method method]
+              (let [method-name (.getName method)
+                    key (-> method-name
+                            (str/replace #"([a-z])([A-Z])" "$1-$2")
+                            str/lower-case
+                            keyword)]
+                (if (and (zero? (alength (.getParameterTypes method)))
+                         (contains? m key)
+                         (not (str/starts-with? method-name "_")))
+                  (assoc m key (enum-keywords (.invoke method o (object-array 0))
+                                               (get m key)))
+                  m)))
+            value (.getMethods (class o)))
+    :else value))
+
+(defn- error-details->map [details]
+  (enum-keywords details (kebab-keys (json->clj (JsonValue/from details)))))
 
 (defn- ->keyword [x]
   (-> x str str/lower-case (str/replace "_" "-") keyword))

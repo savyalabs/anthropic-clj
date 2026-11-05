@@ -5,6 +5,17 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-04
+
+### Added
+
+- Surface typed API error details as kebab-case `:error-details` maps.
+- Support the `:ids` filter when listing organization workspaces.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.5.0**.
+
 ## [0.45.0] - 2026-11-03
 
 ### Added
