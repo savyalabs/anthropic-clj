@@ -667,3 +667,32 @@
                                    #(organization/deny-spend-limit-increase-request % "slir_42"))]
     (is (= "slir_42" (:id result)))
     (is (= "1250.00" (get-in result [:spend-summary :amount])))))
+
+(defn- beta-org-user []
+  (-> (com.anthropic.models.beta.organization.users.BetaOrganizationUser/builder)
+      (.id "user_42")
+      (.addedAt (java.time.OffsetDateTime/parse "2026-11-01T00:00:00Z"))
+      (.email "ada@example.com")
+      (.name "Ada")
+      (.role (com.anthropic.models.beta.organization.BetaOrganizationRole/of "developer"))
+      (.build)))
+
+(deftest sign-out-org-user-builds-params
+  (let [[_ params] (exercise-single! :users
+                                     "com.anthropic.services.blocking.beta.organization.UserService"
+                                     (beta-org-user)
+                                     #(organization/sign-out-org-user % "user_42"))]
+    (is (= "user_42" (present (.userId params))))))
+
+(deftest sign-out-org-user-requires-user-id
+  (is (= {:anthropic/error :missing-key :key :user-id}
+         (missing-key #(organization/sign-out-org-user (support/beta-client {}) nil)))))
+
+(deftest sign-out-org-user-round-trips
+  (let [[result] (exercise-single! :users
+                                   "com.anthropic.services.blocking.beta.organization.UserService"
+                                   (beta-org-user)
+                                   #(organization/sign-out-org-user % "user_42"))]
+    (is (= {:id "user_42" :email "ada@example.com" :name "Ada" :role :developer}
+           (select-keys result [:id :email :name :role])))
+    (is (string? (:added-at result)))))
