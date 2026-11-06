@@ -47,7 +47,8 @@
             (claudeTag [_] (:claude-tag services))
             (telemetryDestinations [_] (:telemetry-destinations services))
             (webhooks [_] (:webhooks services))
-            (workspaces [_] (:workspaces services))))))))
+            (workspaces [_] (:workspaces services))
+            (users [_] (:users services))))))))
 
 (defn stable-client
   "Builds a client whose GA services are supplied by services map."
@@ -141,7 +142,7 @@
   (proxy-service (Class/forName interface)
                  (fn [method args]
                    (when (contains? #{"create" "retrieve" "update" "delete" "set" "list" "remove"
-                                      "add" "approve" "deny" "test" "regenerateSigningSecret"
+                                      "add" "approve" "deny" "test" "regenerateSigningSecret" "signOut"
                                       "validateArchive" "validateRepository"} method)
                      (reset! captured (first args)))
                    (if (fn? response) (response args) response))))

@@ -185,7 +185,7 @@
 (deftest public-api-covers-every-service
   (testing "one idiomatic fn per Organization operation is present"
     (doseq [s '[get-organization
-                get-org-user update-org-user list-org-users remove-org-user
+                get-org-user update-org-user list-org-users remove-org-user sign-out-org-user
                 get-api-key update-api-key list-api-keys
                 create-external-key get-external-key update-external-key
                 list-external-keys delete-external-key validate-external-key

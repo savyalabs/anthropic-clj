@@ -5,6 +5,17 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-05
+
+### Added
+
+- `sign-out-org-user`: sign an organization user out of every session (beta).
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.6.0**. Its new typed
+  errors (sign-out, ramp limit, external key validation) surface through `:error-details`.
+
 ## [0.46.0] - 2026-11-04
 
 ### Added

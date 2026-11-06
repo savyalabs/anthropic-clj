@@ -411,6 +411,23 @@
   (with-api-errors
     (obj->clj (-> (.organization client) (.users) (.remove user-id)))))
 
+(defn sign-out-org-user
+  "Sign an organization user out of every session (beta). Returns the user
+  map, shaped like `get-org-user`."
+  [^AnthropicClient client ^String user-id]
+  (when-not user-id (missing-key! :user-id))
+  (with-api-errors
+    (let [^com.anthropic.models.beta.organization.users.BetaOrganizationUser r
+          (-> (.beta client) (.organization) (.users)
+              (.signOut (-> (com.anthropic.models.beta.organization.users.UserSignOutParams/builder)
+                            (.userId user-id)
+                            (.build))))]
+      {:id (.id r)
+       :added-at (str (.addedAt r))
+       :email (.email r)
+       :name (.name r)
+       :role (kw<- (.asString ^com.anthropic.models.beta.organization.BetaOrganizationRole (.role r)))})))
+
 ;; ---- API keys -------------------------------------------------------------
 
 (defn- api-key->map [^com.anthropic.models.beta.organization.apikeys.BetaApiKey r]
