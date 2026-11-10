@@ -4499,6 +4499,12 @@
    :organization-id (.organizationId d)
    :enforcement-action-id (.enforcementActionId d)})
 
+(defn- webhook-program-status-updated->map
+  [^com.anthropic.models.beta.webhooks.BetaWebhookUserProfileProgramStatusUpdatedEventData d]
+  {:type :user-profile-program-status-updated
+   :data-id (.id d)
+   :organization-id (.organizationId d)})
+
 (defn- webhook-enforcement-action-resolved->map
   [^com.anthropic.models.beta.webhooks.BetaWebhookUserProfileEnforcementActionResolvedEventData d]
   {:type :user-profile-enforcement-action-resolved
@@ -4556,6 +4562,8 @@
     (webhook-enforcement-action-opened->map (.asUserProfileEnforcementActionOpened d))
     (.isUserProfileEnforcementActionResolved d)
     (webhook-enforcement-action-resolved->map (.asUserProfileEnforcementActionResolved d))
+    (.isUserProfileProgramStatusUpdated d)
+    (webhook-program-status-updated->map (.asUserProfileProgramStatusUpdated d))
     :else {:type :unknown}))
 
 (defn- webhook-event->map [^UnwrapWebhookEvent r]

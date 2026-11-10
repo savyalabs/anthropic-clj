@@ -194,12 +194,14 @@
                                      :name "Enforcement"
                                      :description "Profile enforcement"
                                      :enabled-events [:user-profile-enforcement-action-opened
-                                                      :user-profile-enforcement-action-resolved]}))]
+                                                      :user-profile-enforcement-action-resolved
+                                                      :user-profile-program-status-updated]}))]
     (is (= "https://hooks.example.com/anthropic" (.url params)))
     (is (= "Enforcement" (present (.name params))))
     (is (= "Profile enforcement" (present (.description params))))
     (is (= [WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_OPENED
-            WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_RESOLVED]
+            WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_RESOLVED
+            WebhookCreateParams$EnabledEvent/USER_PROFILE_PROGRAM_STATUS_UPDATED]
            (vec (.enabledEvents params))))
     (is (= "whep_1" (:id result)))
     (is (= "whsec_1" (:signing-secret result)))))

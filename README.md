@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.47.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.48.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.47.0"]
+[net.clojars.savya/anthropic-clj "0.48.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -62,7 +62,7 @@ OpenTelemetry tracing is reachable through `:configure`, for example
 settings are reachable with the SDK's `(.withOptions client consumer)` on a
 built client. This library adds no OpenTelemetry dependency.
 
-Tracks [`com.anthropic/anthropic-java` 3.6.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.6.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 3.7.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.7.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 

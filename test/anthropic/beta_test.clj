@@ -3323,6 +3323,22 @@
               :id "evt_enf" :created-at "2026-10-05T00:00Z" :event-type "event"}
              (webhook-event->map event))))))
 
+(deftest webhook-user-profile-program-status-updated-converts
+  (let [data (-> (com.anthropic.models.beta.webhooks.BetaWebhookUserProfileProgramStatusUpdatedEventData/builder)
+                 (.id "uprof_1") (.organizationId "org_1")
+                 (.type (JsonValue/from "user_profile.program_status_updated"))
+                 (.build))
+        event (-> (UnwrapWebhookEvent/builder)
+                  (.id "evt_prog")
+                  (.createdAt (java.time.OffsetDateTime/parse "2026-11-10T00:00:00Z"))
+                  (.data (BetaWebhookEventData/ofUserProfileProgramStatusUpdated data))
+                  (.type (JsonValue/from "event"))
+                  (.build))]
+    (is (= {:type :user-profile-program-status-updated :data-id "uprof_1"
+            :organization-id "org_1"
+            :id "evt_prog" :created-at "2026-11-10T00:00Z" :event-type "event"}
+           (webhook-event->map event)))))
+
 (deftest webhook-generic-variants-convert
   ;; Regression: the shared mapper used to cast every generic variant to the
   ;; session-created data class and threw ClassCastException.
