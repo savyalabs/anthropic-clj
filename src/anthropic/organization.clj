@@ -1390,8 +1390,9 @@
 (defn list-analytics-usage
   "List token-usage analytics buckets. Requires `:starting-at` (an ISO-8601
   instant). Options include `:ending-at`, `:time-bucket-width` (`:minute`/
-  `:hour`/`:day`, sent as `1m`/`1h`/`1d`), `:group-by` (e.g. `[:model :workspace-id]`), actor and id
-  filters (`:actor-types`, `:actor-ids`, `:api-key-ids`, `:workspace-ids`,
+  `:hour`/`:day`, sent as `1m`/`1h`/`1d`), `:group-by` (e.g. `[:model :workspace-id]`
+  or `[:organization-id]`), actor and id filters (`:actor-types`, `:actor-ids`,
+  `:api-key-ids`, `:organization-ids`, `:workspace-ids`,
   `:models`, `:products`, `:service-tiers`, `:speeds`, ...),
   `:exclude-deleted-users`, `:order`, `:order-by`, `:limit`, and `:page`."
   [client opts]

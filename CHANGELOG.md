@@ -5,6 +5,22 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-10
+
+### Added
+
+- Model aliases `:claude-fable-5-2`, `:claude-mythos-5-2`, and `:claude-opus-5-5`.
+- `unwrap-webhook` maps the `user_profile.program_status_updated` event, and
+  webhook endpoints accept it in `:enabled-events` (beta).
+- `list-analytics-usage` and `list-analytics-cost` document the new
+  `:organization-ids` filter and `:organization-id` group-by (beta).
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.7.0**. The new
+  sandbox-egress-restricted error surfaces through `:error-details`; the beta
+  billing-frozen error details were removed upstream.
+
 ## [0.47.0] - 2026-11-05
 
 ### Added

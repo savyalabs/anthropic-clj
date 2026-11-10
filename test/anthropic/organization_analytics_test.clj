@@ -511,7 +511,8 @@
               :time-bucket-width :day
               :actor-types [:user-actor :service-account-actor]
               :actor-ids ["user_1"]
-              :group-by [:model :workspace-id]
+              :group-by [:model :workspace-id :organization-id]
+              :organization-ids ["org_1"]
               :products [:claude-code :messages-api]
               :workspace-ids ["wrkspc_1"]
               :exclude-deleted-users true
@@ -524,7 +525,8 @@
     (is (= "1d" (.asString (present (.timeBucketWidth params)))))
     (is (= ["user_actor" "service_account_actor"] (enum-values (.actorTypes params))))
     (is (= ["user_1"] (vec (present (.actorIds params)))))
-    (is (= ["model" "workspace_id"] (enum-values (.groupBy params))))
+    (is (= ["model" "workspace_id" "organization_id"] (enum-values (.groupBy params))))
+    (is (= ["org_1"] (vec (present (.organizationIds params)))))
     (is (= ["claude_code" "messages_api"] (enum-values (.products params))))
     (is (= ["wrkspc_1"] (vec (present (.workspaceIds params)))))
     (is (= true (present (.excludeDeletedUsers params))))
@@ -574,13 +576,15 @@
          #(organization/list-analytics-cost
            % {:starting-at "2026-10-01T00:00:00Z"
               :time-bucket-width :hour
-              :group-by [:cost-type :token-type]
+              :group-by [:cost-type :token-type :organization-id]
+              :organization-ids ["org_1"]
               :order-by :list-amount
               :order :asc
               :api-key-ids ["apikey_1"]}))]
     (is (= "2026-10-01T00:00Z" (str (.startingAt params))))
     (is (= "1h" (.asString (present (.timeBucketWidth params)))))
-    (is (= ["cost_type" "token_type"] (enum-values (.groupBy params))))
+    (is (= ["cost_type" "token_type" "organization_id"] (enum-values (.groupBy params))))
+    (is (= ["org_1"] (vec (present (.organizationIds params)))))
     (is (= "list_amount" (.asString (present (.orderBy params)))))
     (is (= "asc" (.asString (present (.order params)))))
     (is (= ["apikey_1"] (vec (present (.apiKeyIds params)))))

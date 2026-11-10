@@ -145,13 +145,22 @@
 
 (deftest named-model-keywords
   (testing "public model aliases expose the verified SDK model ids"
-    (is (= 21 (count a/models)))
+    (is (= "claude-fable-5-2" (:claude-fable-5-2 a/models)))
+    (is (= "claude-mythos-5-2" (:claude-mythos-5-2 a/models)))
+    (is (= "claude-opus-5-5" (:claude-opus-5-5 a/models)))
     (is (= "claude-fable-5-1" (:claude-fable-5-1 a/models)))
     (is (= "claude-mythos-5-1" (:claude-mythos-5-1 a/models)))
     (is (= "claude-opus-5" (:claude-opus-5 a/models)))
     (is (= "claude-sonnet-5-5" (:claude-sonnet-5-5 a/models)))
     (is (= "claude-haiku-5-5" (:claude-haiku-5-5 a/models)))
     (is (= "claude-opus-4-8" (:claude-opus-4-8 a/models))))
+  (testing "every named SDK model has a keyword alias"
+    (let [sdk-ids (for [^java.lang.reflect.Field f (.getFields com.anthropic.models.messages.Model)
+                        :when (and (java.lang.reflect.Modifier/isStatic (.getModifiers f))
+                                   (= com.anthropic.models.messages.Model (.getType f)))]
+                    (str (.get f nil)))]
+      (is (seq sdk-ids))
+      (is (empty? (remove (set (vals a/models)) sdk-ids)))))
   (testing "a keyword model builds the same message params as its string id"
     (let [req {:max-tokens 512 :messages [{:role :user :content "hi"}]}
           ^MessageCreateParams keyword-params (->params (assoc req :model :claude-opus-4-8))
