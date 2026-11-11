@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-11
+
+### Added
+
+- Claude Tag settings accept and return `:reply-mode`
+  (`{:type :always-awake|:automatic|:mention-only|:thread}`) (beta).
+- Analytics activity results carry the new Claude Tag metrics
+  (`:claude-tag-metrics`, `:claude-tag-*-active-user-count`).
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.8.0**.
+
 ## [0.48.0] - 2026-11-10
 
 ### Added

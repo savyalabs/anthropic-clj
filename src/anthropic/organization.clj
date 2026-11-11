@@ -1521,7 +1521,8 @@
 (defn validate-plugin-marketplace-repository [client repository-url opts] (with-api-errors (admin-call client "pluginMarketplaces" "validateRepository" "com.anthropic.models.beta.organization.pluginmarketplaces.PluginMarketplaceValidateRepositoryParams" (assoc (or opts {}) :repository-url repository-url))))
 ;; ---- Claude Tag ------------------------------------------------------------
 ;; Settings maps (`:enabled`, `:model`, `:instructions`, `:environment-id`,
-;; `:guest-policy {:type :allow|:restrict|:channel-only}`) and Slack
+;; `:guest-policy {:type :allow|:restrict|:channel-only}`,
+;; `:reply-mode {:type :always-awake|:automatic|:mention-only|:thread}`) and Slack
 ;; identifier maps are converted into the SDK's nested request objects.
 
 (def ^:private claude-tag-params "com.anthropic.models.beta.organization.claudetag.")

@@ -31,6 +31,8 @@
       (.model "claude-opus-5-5")
       (.guestPolicy (BetaClaudeTagGuestPolicy/ofRestrict
                      (.build (BetaClaudeTagGuestPolicyRestrict/builder))))
+      (.replyMode (com.anthropic.models.beta.organization.claudetag.BetaClaudeTagReplyMode/ofThread
+                   (.build (com.anthropic.models.beta.organization.claudetag.BetaClaudeTagReplyModeThread/builder))))
       (.build)))
 
 (defn- slack-channel []
@@ -79,12 +81,14 @@
                                   % {:slack {:channel-id "C123" :workspace-id "T456"}
                                      :settings {:enabled true
                                                 :model "claude-opus-5-5"
-                                                :guest-policy {:type :restrict}}}))]
+                                                :guest-policy {:type :restrict}
+                                                :reply-mode {:type :mention-only}}}))]
     (is (= "C123" (.channelId (.slack params))))
     (is (= "T456" (.workspaceId (.slack params))))
     (is (= true (present (.enabled (present (.settings params))))))
     (is (= "claude-opus-5-5" (present (.model (present (.settings params))))))
     (is (.isRestrict (present (.guestPolicy (present (.settings params))))))
+    (is (.isMentionOnly (present (.replyMode (present (.settings params))))))
     (is (= "ctsc_1" (:id result)))))
 
 (deftest claude-tag-slack-channel-create-requires-slack
@@ -103,7 +107,7 @@
     (is (= "2026-10-01T09:00:00Z" (:created-at result)))
     (is (= {:channel-id "C123" :workspace-id "T456"} (:slack result)))
     (is (= {:enabled true :model "claude-opus-5-5" :guest-policy {:type :restrict}
-            :environment-id nil :instructions nil}
+            :reply-mode {:type :thread} :environment-id nil :instructions nil}
            (:settings result)))))
 
 (deftest claude-tag-slack-channel-get-builds-params
@@ -118,10 +122,12 @@
         (support/exercise-path! :claude-tag [claude-tag] slack-channels (slack-channel)
                                 #(organization/update-claude-tag-slack-channel
                                   % "ctsc_1" {:settings {:instructions "Be brief"
-                                                         :guest-policy {:type :channel-only}}}))]
+                                                         :guest-policy {:type :channel-only}
+                                                         :reply-mode {:type :always-awake}}}))]
     (is (= "ctsc_1" (present (.id params))))
     (is (= "Be brief" (present (.instructions (.settings params)))))
     (is (.isChannelOnly (present (.guestPolicy (.settings params)))))
+    (is (.isAlwaysAwake (present (.replyMode (.settings params)))))
     (is (= "ctsc_1" (:id result)))))
 
 (deftest claude-tag-slack-channel-list-builds-params
