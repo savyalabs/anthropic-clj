@@ -1535,6 +1535,14 @@
   "Retrieve one Claude Tag bundle by id."
   [client bundle-id]
   (with-api-errors (admin-call client ["claudeTag" "bundles"] "retrieve" (str claude-tag-params "bundles.BundleRetrieveParams") {:bundle-id bundle-id})))
+(defn update-claude-tag-bundle
+  "Update a Claude Tag bundle's `:instructions` and/or `:betas`."
+  [client bundle-id changes]
+  (when-not bundle-id (missing-key! :bundle-id))
+  (with-api-errors
+    (admin-call client ["claudeTag" "bundles"] "update"
+                (str claude-tag-params "bundles.BundleUpdateParams")
+                (assoc changes :bundle-id bundle-id))))
 
 (defn create-claude-tag-bundle-target
   "Attach a target to a Claude Tag bundle. Requires `:target`, a map such as

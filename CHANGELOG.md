@@ -5,6 +5,21 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-16
+
+### Added
+
+- `update-claude-tag-bundle` updates Claude Tag bundle instructions and betas
+  (beta); bundle responses include `:instructions`.
+- RBAC role responses include `:source` with a keyword `:type` of `:built-in`
+  or `:custom`.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.9.0**. New
+  typed parent-organization, RBAC-role, and Claude Tag bundle errors surface
+  through `:error-details`.
+
 ## [0.49.0] - 2026-11-11
 
 ### Added

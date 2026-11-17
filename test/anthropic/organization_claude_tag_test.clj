@@ -60,6 +60,7 @@
       (.id "ctb_1")
       (.displayName "Support bundle")
       (.description "Bundled settings")
+      (.instructions "Route support requests to the help desk")
       (.createdAt timestamp)
       (.build)))
 
@@ -206,9 +207,29 @@
         (support/exercise-path! :claude-tag [claude-tag] bundles (bundle)
                                 #(organization/get-claude-tag-bundle % "ctb_1"))]
     (is (= "ctb_1" (present (.bundleId params))))
-    (is (= #{:id :created-at :description :display-name :type :updated-at} (set (keys result))))
+    (is (= #{:id :created-at :description :display-name :instructions :type :updated-at} (set (keys result))))
     (is (= "Support bundle" (:display-name result)))
-    (is (= "Bundled settings" (:description result)))))
+    (is (= "Bundled settings" (:description result)))
+    (is (= "Route support requests to the help desk" (:instructions result)))))
+
+(deftest claude-tag-bundle-update-builds-params
+  (let [[result params]
+        (support/exercise-path! :claude-tag [claude-tag] bundles (bundle)
+                                #(organization/update-claude-tag-bundle
+                                  % "ctb_1" {:instructions "Escalate urgent requests"
+                                               :betas ["claude-tag-2026-11-16"]}))]
+    (is (= "ctb_1" (present (.bundleId params))))
+    (is (= "Escalate urgent requests" (present (.instructions params))))
+    (is (= ["claude_tag_2026_11_16"]
+           (mapv #(.asString %) (present (.betas params)))))
+    (is (= "Route support requests to the help desk" (:instructions result)))))
+
+(deftest claude-tag-bundle-update-requires-bundle-id
+  (let [error (try (organization/update-claude-tag-bundle (support/beta-client {}) nil {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+    (is (= {:anthropic/error :missing-key :key :bundle-id}
+           (select-keys (ex-data error) [:anthropic/error :key])))))
 
 (deftest claude-tag-bundle-list-builds-params
   (let [[result params]
