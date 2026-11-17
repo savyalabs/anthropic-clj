@@ -2012,6 +2012,13 @@
                               :lease-extended true
                               :ttl-seconds 30
                               :last-heartbeat "2026-11-04T00:00:00Z"}}
+             (:error-details (ex-data ex))))))
+  (testing "new Claude Tag bundle errors preserve typed details"
+    (let [ex (normalize
+              (service-ex com.anthropic.models.beta.organization.claudetag.BetaBundleOnCallException
+                          {"type" "invalid_request_error"
+                           "details" {"error_code" "bundle_on_call"}}))]
+      (is (= {:error-code "bundle_on_call"}
              (:error-details (ex-data ex)))))))
 
 (deftest untyped-error-has-no-error-details

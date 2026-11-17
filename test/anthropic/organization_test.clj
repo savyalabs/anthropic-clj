@@ -215,7 +215,7 @@
                 list-rbac-role-permissions list-effective-spend-limits
                 list-spend-limit-increase-requests get-spend-limit-increase-request
                 approve-spend-limit-increase-request deny-spend-limit-increase-request
-                list-claude-tag-bundles get-claude-tag-bundle
+                list-claude-tag-bundles get-claude-tag-bundle update-claude-tag-bundle
                 create-claude-tag-bundle-target get-claude-tag-bundle-target
                 list-claude-tag-bundle-targets delete-claude-tag-bundle-target
                 create-claude-tag-slack-channel get-claude-tag-slack-channel
