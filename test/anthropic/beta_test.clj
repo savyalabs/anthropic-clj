@@ -98,6 +98,8 @@
                                                BetaWebhookEnvironmentCreatedEventData
                                                BetaWebhookEnvironmentDeletedEventData
                                                BetaWebhookEnvironmentUpdatedEventData
+                                               BetaWebhookExternalKeyFailedEventData
+                                               BetaWebhookExternalKeyRecoveredEventData
                                                BetaWebhookMemoryStoreArchivedEventData
                                                BetaWebhookMemoryStoreCreatedEventData
                                                BetaWebhookMemoryStoreDeletedEventData
@@ -3200,6 +3202,29 @@
                          com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionEvent))]
     (is (empty? missing)
         (str "session event variants with no mapper branch: " (sort missing)))))
+
+(deftest webhook-external-key-response-mapping
+  (doseq [[expected webhook-data]
+          [[{:type :external-key-failed :data-id "key_1" :organization-id "org_1"}
+            (BetaWebhookEventData/ofExternalKeyFailed
+             (-> (BetaWebhookExternalKeyFailedEventData/builder)
+                 (.id "key_1") (.organizationId "org_1")
+                 (.type (JsonValue/from "external_key.failed")) (.build)))]
+           [{:type :external-key-recovered :data-id "key_1" :organization-id "org_1"}
+            (BetaWebhookEventData/ofExternalKeyRecovered
+             (-> (BetaWebhookExternalKeyRecoveredEventData/builder)
+                 (.id "key_1") (.organizationId "org_1")
+                 (.type (JsonValue/from "external_key.recovered")) (.build)))] ]]
+    (is (= expected
+           (select-keys
+            (webhook-event->map
+             (-> (UnwrapWebhookEvent/builder)
+                 (.id "evt_1")
+                 (.createdAt (java.time.OffsetDateTime/parse "2026-11-18T00:00:00Z"))
+                 (.data webhook-data)
+                 (.type (JsonValue/from "event"))
+                 (.build)))
+            [:type :data-id :organization-id :workspace-id])))))
 
 (deftest every-webhook-event-variant-is-mapped
   (let [src (mapper-source)

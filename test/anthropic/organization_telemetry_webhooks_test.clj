@@ -100,7 +100,7 @@
     (is (= "2026-10-02T08:00:00Z" (:created-at result)))
     (is (= {:type :enabled} (:state result)))
     (is (= {:type :include :workspace-ids ["wrkspc_1"]} (:workspaces result)))
-    (is (= {:enabled true :content-mode :redacted :max-content-bytes 2048}
+    (is (= {:enabled true :content-mode :redacted :max-content-bytes 2048 :endpoint-url nil}
            (:traces result)))
     (is (= "2026-10-02T08:05:00Z" (get-in result [:delivery-health :last-success-at])))))
 
@@ -195,13 +195,17 @@
                                      :description "Profile enforcement"
                                      :enabled-events [:user-profile-enforcement-action-opened
                                                       :user-profile-enforcement-action-resolved
-                                                      :user-profile-program-status-updated]}))]
+                                                      :user-profile-program-status-updated
+                                                      :external-key-failed
+                                                      :external-key-recovered]}))]
     (is (= "https://hooks.example.com/anthropic" (.url params)))
     (is (= "Enforcement" (present (.name params))))
     (is (= "Profile enforcement" (present (.description params))))
     (is (= [WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_OPENED
             WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_RESOLVED
-            WebhookCreateParams$EnabledEvent/USER_PROFILE_PROGRAM_STATUS_UPDATED]
+            WebhookCreateParams$EnabledEvent/USER_PROFILE_PROGRAM_STATUS_UPDATED
+            WebhookCreateParams$EnabledEvent/EXTERNAL_KEY_FAILED
+            WebhookCreateParams$EnabledEvent/EXTERNAL_KEY_RECOVERED]
            (vec (.enabledEvents params))))
     (is (= "whep_1" (:id result)))
     (is (= "whsec_1" (:signing-secret result)))))

@@ -14,6 +14,8 @@
            (com.anthropic.models.beta.messages BetaBase64ImageSource
                                                BetaBase64ImageSource$MediaType
                                                BetaBase64PdfSource
+                                               BetaBillingPolicy
+                                               BetaBillTo
                                                BetaCacheControlEphemeral
                                                BetaCacheControlEphemeral$Ttl
                                                BetaContainerParams
@@ -395,6 +397,11 @@
       (throw (ex-info (str "Unsupported " key " value")
                       {:anthropic/error :invalid-enum-value :key key :value value
                        :allowed allowed})))))
+
+(defn- ->billing-policy ^BetaBillingPolicy [{:keys [bill-to]}]
+  (let [bill-to (->enum-value bill-to #{:self :user-profile} identity :bill-to)
+        ^BetaBillTo bill-to (BetaBillTo/of (str/replace (name bill-to) "-" "_"))]
+    (-> (BetaBillingPolicy/builder) (.billTo bill-to) (.build))))
 
 (defn- ->thinking-block-binding
   ^com.anthropic.models.beta.messages.BetaThinkingBlockBinding
@@ -1241,7 +1248,7 @@
            tool-choice thinking metadata service-tier response-format output-format output-type effort container inference-geo
            task-budget
            compaction context-management diagnostics speed
-           user-profile-id cache-control betas mcp-servers fallbacks fallback-credit-token thread
+           user-profile-id billing-policy cache-control betas mcp-servers fallbacks fallback-credit-token thread
            extra-headers extra-query extra-body]
     :or {model "claude-opus-4-8" max-tokens 1024}}]
   (let [^String model-name (if (keyword? model) (name model) model)
@@ -1263,6 +1270,7 @@
         (.container b ^BetaContainerParams (->beta-container-params container))))
     (when inference-geo (.inferenceGeo b ^String inference-geo))
     (when user-profile-id (.userProfileId b ^String user-profile-id))
+    (when billing-policy (.billingPolicy b (->billing-policy billing-policy)))
     (when cache-control (.cacheControl b (->cache-control cache-control)))
     (when (or response-format output-type effort task-budget) (.outputConfig b (->output-config response-format effort task-budget output-type)))
     (when output-format (.outputFormat b (->json-output-format output-format)))
@@ -1302,7 +1310,7 @@
 
 (defn- ->count-params ^MessageCountTokensParams
   [{:keys [model system messages tools thinking tool-choice betas cache-control compaction context-management
-           mcp-servers response-format output-type effort task-budget output-format speed user-profile-id
+           mcp-servers response-format output-type effort task-budget output-format speed user-profile-id billing-policy
            extra-headers extra-query extra-body]
     :or {model "claude-opus-4-8"}}]
   (let [^String model-name (if (keyword? model) (name model) model)
@@ -1319,6 +1327,7 @@
         (.addBeta b beta-name)))
     (when cache-control (.cacheControl b (->cache-control cache-control)))
     (when user-profile-id (.userProfileId b ^String user-profile-id))
+    (when billing-policy (.billingPolicy b (->billing-policy billing-policy)))
     (when (or response-format output-type effort task-budget) (.outputConfig b (->output-config response-format effort task-budget output-type)))
     (when output-format (.outputFormat b (->json-output-format output-format)))
     (when compaction (.compaction b (->compaction compaction)))
@@ -1443,7 +1452,7 @@
 (defn create-beta-message
   "Send a beta Messages request and return a generic Clojure map response.
 
-  Request maps support compaction, context-management, diagnostics, speed, and
+  Request maps support billing-policy, compaction, context-management, diagnostics, speed, and
   tool-choice disable-parallel-tool-use options. Tool specs support response-inclusion,
   input-examples, eager-input-streaming, caching, and dated :version options.
   System text and text content blocks accept citation-list `:citations`; document
@@ -1604,7 +1613,7 @@
 
 (defn count-beta-tokens
   "Count beta Messages input tokens without creating a message. Request maps
-  support cache-control, compaction, context-management, mcp-servers, response-format,
+  support billing-policy, cache-control, compaction, context-management, mcp-servers, response-format,
   output-type, effort, task-budget, output-format, speed, user-profile-id, extra-headers,
   extra-query, and extra-body. Returns :input-tokens and, when present, nested
   :context-management data."
@@ -1625,6 +1634,7 @@
           (.maxTokens (.maxTokens p)) (.messages (.messages p)) (.model (.model p)))]
     (doseq [[value setter]
             [[(.cacheControl p) #(.cacheControl b ^BetaCacheControlEphemeral %)]
+             [(.billingPolicy p) #(.billingPolicy b ^BetaBillingPolicy %)]
              [(.inferenceGeo p) #(.inferenceGeo b ^String %)]
              [(.mcpServers p) #(.mcpServers b ^java.util.List %)]
              [(.metadata p) #(.metadata b ^BetaMetadata %)]
@@ -1787,6 +1797,7 @@
     (.maxTokens b (._maxTokens p))
     (.messages b (._messages p))
     (.model b (._model p))
+    (.billingPolicy b (._billingPolicy p))
     (.cacheControl b (._cacheControl p))
     (.compaction b (._compaction p))
     (.container b (._container p))
@@ -1873,11 +1884,11 @@
 (defn thread-update
   "Change request fields used by later sends: `:model`, `:max-tokens`,
   `:system`, `:stop-sequences`, `:thinking`, `:tool-choice`, `:tools`,
-  `:metadata`, `:inference-geo`, `:user-profile-id`, `:cache-control`, and
-  `:betas`."
+  `:metadata`, `:inference-geo`, `:user-profile-id`, `:billing-policy`,
+  `:cache-control`, and `:betas`."
   [^BetaMessageThread thread {:keys [model max-tokens system stop-sequences thinking tool-choice
                                      tools metadata inference-geo user-profile-id cache-control
-                                     betas]}]
+                                     billing-policy betas]}]
   (with-api-errors
     (.update thread
              (reify java.util.function.Consumer
@@ -1898,6 +1909,7 @@
                    (when metadata (.metadata b (->metadata metadata)))
                    (when inference-geo (.inferenceGeo b ^String inference-geo))
                    (when user-profile-id (.userProfileId b ^String user-profile-id))
+                   (when billing-policy (.billingPolicy b (->billing-policy billing-policy)))
                    (when cache-control (.cacheControl b (->cache-control cache-control)))
                    (doseq [beta betas]
                      (let [^String beta-name (if (keyword? beta) (name beta) beta)]

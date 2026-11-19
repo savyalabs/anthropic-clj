@@ -5,6 +5,21 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-18
+
+### Added
+
+- Beta Messages, token counting, message batches, and message threads accept
+  `:billing-policy {:bill-to :self|:user-profile}`.
+- Beta webhook mapping supports `:external-key-failed` and
+  `:external-key-recovered` events.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.10.0**. New
+  typed user-profile billing and linked-organization spend-limit errors surface
+  through `:error-details`.
+
 ## [0.50.0] - 2026-11-16
 
 ### Added

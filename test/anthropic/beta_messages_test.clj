@@ -5,11 +5,12 @@
             [anthropic.core])
   (:import (com.anthropic.core ClientOptions JsonValue RequestOptions)
            (com.anthropic.core.http HttpClient StreamResponse)
-           (com.anthropic.helpers BetaToolRunner)
+           (com.anthropic.helpers BetaMessageThread BetaToolRunner MessageThreadState)
            (com.anthropic.models.beta.messages BetaMessage BetaTextBlock BetaUsage BetaTool
                                                BetaMessageTokensCount BetaCacheCreation BetaContainer MessageCountTokensParams
                                                MessageCreateParams BetaRawContentBlockDeltaEvent
                                                BetaRawMessageStreamEvent BetaStopReason BetaToolUnion
+                                               ThreadCreateParams$UnsupportedRequestBehavior
                                                BetaMcpTool BetaMcpTool$InputSchema BetaMcpToolListingBlock
                                                MessageCountTokensParams$Tool)
            (com.anthropic.models.messages Tool ToolUnion)
@@ -23,6 +24,7 @@
 
 (def ->params #'messages/->params)
 (def ->count-params #'messages/->count-params)
+(def ->thread-create-params #'messages/->thread-create-params)
 (def beta-message->map #'messages/beta-message->map)
 (def beta-message-param->map #'messages/beta-message-param->map)
 
@@ -117,6 +119,29 @@
 (defn- ex-data-for [f]
   (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 (def stable->tool #'anthropic.core/->tool)
+
+(deftest beta-billing-policy-reaches-sdk-params
+  (let [request {:messages [{:role :user :content "hi"}]
+                 :billing-policy {:bill-to :user-profile}}
+        ^MessageCreateParams message (->params request)
+        ^MessageCountTokensParams count (->count-params request)
+        ^BatchCreateParams batch (->batch-create-params
+                                  {:requests [{:custom-id "request_1" :params request}]})
+        thread (->thread-create-params request)]
+    (is (= "USER_PROFILE" (.asString (.get (.billTo (.get (.billingPolicy message)))))))
+    (is (= "USER_PROFILE" (.asString (.get (.billTo (.get (.billingPolicy count)))))))
+    (is (= "USER_PROFILE"
+           (.asString (.get (.billTo (.get (.billingPolicy (.params (first (.requests batch))))))))))
+    (is (= "USER_PROFILE" (.asString (.get (.billTo (.get (.billingPolicy thread)))))))))
+
+(deftest beta-thread-send-billing-policy-reaches-sdk-params
+  (let [state (MessageThreadState.
+               (->params {:messages [{:role :user :content "hi"}]})
+               ThreadCreateParams$UnsupportedRequestBehavior/ERROR)
+        thread (BetaMessageThread. (proxy [MessageService] []) state (RequestOptions/none))]
+    (messages/thread-update thread {:billing-policy {:bill-to :user-profile}})
+    (is (= "USER_PROFILE"
+           (.asString (.get (.billTo (.get (.billingPolicy (.params state))))))))))
 
 (defn- beta-test-message [id]
   (-> (BetaMessage/builder)

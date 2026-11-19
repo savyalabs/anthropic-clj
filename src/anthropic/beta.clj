@@ -183,6 +183,8 @@
                                                BetaWebhookEnvironmentCreatedEventData
                                                BetaWebhookEnvironmentDeletedEventData
                                                BetaWebhookEnvironmentUpdatedEventData
+                                               BetaWebhookExternalKeyFailedEventData
+                                               BetaWebhookExternalKeyRecoveredEventData
                                                BetaWebhookEventData
                                                BetaWebhookMemoryStoreArchivedEventData
                                                BetaWebhookMemoryStoreCreatedEventData
@@ -4512,6 +4514,16 @@
    :organization-id (.organizationId d)
    :enforcement-action-id (.enforcementActionId d)})
 
+(defn- webhook-external-key-failed->map [^BetaWebhookExternalKeyFailedEventData d]
+  {:type :external-key-failed
+   :data-id (.id d)
+   :organization-id (.organizationId d)})
+
+(defn- webhook-external-key-recovered->map [^BetaWebhookExternalKeyRecoveredEventData d]
+  {:type :external-key-recovered
+   :data-id (.id d)
+   :organization-id (.organizationId d)})
+
 (defn- webhook-data->map [^BetaWebhookEventData d]
   (cond
     (.isSessionCreated d) (webhook-session-created->map (.asSessionCreated d))
@@ -4564,6 +4576,10 @@
     (webhook-enforcement-action-resolved->map (.asUserProfileEnforcementActionResolved d))
     (.isUserProfileProgramStatusUpdated d)
     (webhook-program-status-updated->map (.asUserProfileProgramStatusUpdated d))
+    (.isExternalKeyFailed d)
+    (webhook-external-key-failed->map (.asExternalKeyFailed d))
+    (.isExternalKeyRecovered d)
+    (webhook-external-key-recovered->map (.asExternalKeyRecovered d))
     :else {:type :unknown}))
 
 (defn- webhook-event->map [^UnwrapWebhookEvent r]
