@@ -1603,6 +1603,76 @@
   [client id changes]
   (with-api-errors (admin-call client ["claudeTag" "slackWorkspaces"] "update" (str claude-tag-params "slackworkspaces.SlackWorkspaceUpdateParams") (assoc changes :id id))))
 
+;; ---- Claude Code managed settings -----------------------------------------
+;; `:mode` is `{:type :organization}` or `{:type :rbac-groups}`. Settings
+;; documents are passed through as maps, preserving their provider-defined keys.
+
+(def ^:private claude-code-managed-settings-params
+  "com.anthropic.models.beta.organization.claudecode.managedsettings.")
+
+(defn get-claude-code-managed-settings-configuration
+  "Retrieve the organization-wide Claude Code managed-settings configuration."
+  [client]
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "configuration"] "retrieve"
+                (str claude-code-managed-settings-params "configuration.ConfigurationRetrieveParams") {})))
+
+(defn update-claude-code-managed-settings-configuration
+  "Update Claude Code managed-settings mode or RBAC group order."
+  [client changes]
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "configuration"] "update"
+                (str claude-code-managed-settings-params "configuration.ConfigurationUpdateParams") changes)))
+
+(defn get-claude-code-rbac-group-default-managed-settings
+  "Retrieve the default Claude Code settings for RBAC groups."
+  [client]
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "rbacGroupDefault"] "retrieve"
+                (str claude-code-managed-settings-params "rbacgroupdefault.RbacGroupDefaultRetrieveParams") {})))
+
+(defn update-claude-code-rbac-group-default-managed-settings
+  "Update the default Claude Code settings for RBAC groups."
+  [client changes]
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "rbacGroupDefault"] "update"
+                (str claude-code-managed-settings-params "rbacgroupdefault.RbacGroupDefaultUpdateParams") changes)))
+
+(defn list-claude-code-rbac-group-managed-settings
+  "List Claude Code managed settings for RBAC groups. Options: `:limit`, `:page`, `:betas`."
+  ([client] (list-claude-code-rbac-group-managed-settings client {}))
+  ([client opts]
+   (with-api-errors
+     (admin-list client ["claudeCode" "managedSettings" "rbacGroups"]
+                 (str claude-code-managed-settings-params "rbacgroups.RbacGroupListParams") opts))))
+
+(defn get-claude-code-rbac-group-managed-settings
+  "Retrieve Claude Code managed settings for an RBAC group."
+  [client rbac-group-id]
+  (when-not rbac-group-id (missing-key! :rbac-group-id))
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "rbacGroups"] "retrieve"
+                (str claude-code-managed-settings-params "rbacgroups.RbacGroupRetrieveParams")
+                {:rbac-group-id rbac-group-id})))
+
+(defn set-claude-code-rbac-group-managed-settings
+  "Set Claude Code managed settings for an RBAC group."
+  [client rbac-group-id changes]
+  (when-not rbac-group-id (missing-key! :rbac-group-id))
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "rbacGroups"] "set"
+                (str claude-code-managed-settings-params "rbacgroups.RbacGroupSetParams")
+                (assoc changes :rbac-group-id rbac-group-id))))
+
+(defn delete-claude-code-rbac-group-managed-settings
+  "Delete Claude Code managed settings for an RBAC group."
+  [client rbac-group-id]
+  (when-not rbac-group-id (missing-key! :rbac-group-id))
+  (with-api-errors
+    (admin-call client ["claudeCode" "managedSettings" "rbacGroups"] "delete"
+                (str claude-code-managed-settings-params "rbacgroups.RbacGroupDeleteParams")
+                {:rbac-group-id rbac-group-id})))
+
 ;; ---- Telemetry destinations ------------------------------------------------
 ;; `:workspaces` is `{:type :all}`, `{:type :include :workspace-ids [...]}` or
 ;; `{:type :exclude :workspace-ids [...]}`; `:state` is `{:type :enabled}` or

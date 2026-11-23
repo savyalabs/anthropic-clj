@@ -2019,7 +2019,18 @@
                           {"type" "invalid_request_error"
                            "details" {"error_code" "bundle_on_call"}}))]
       (is (= {:error-code "bundle_on_call"}
-             (:error-details (ex-data ex)))))))
+             (:error-details (ex-data ex)))))
+  (testing "image dimension details preserve typed fields"
+    (let [ex (normalize
+              (service-ex com.anthropic.models.messages.ImageDimensionsTooLargeException
+                          {"type" "invalid_request_error"
+                           "details" {"error_code" "image_dimensions_too_large"
+                                      "paths" ["messages.0.content.0.source"]
+                                      "max_side_length_pixels" 8000}}))]
+      (is (= {:error-code "image_dimensions_too_large"
+              :paths ["messages.0.content.0.source"]
+              :max-side-length-pixels 8000}
+             (:error-details (ex-data ex))))))))
 
 (deftest untyped-error-has-no-error-details
   (let [ex (normalize

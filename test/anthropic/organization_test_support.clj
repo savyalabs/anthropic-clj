@@ -44,6 +44,7 @@
             (rbacRoles [_] (:rbac-roles services))
             (plugins [_] (:plugins services))
             (pluginMarketplaces [_] (:plugin-marketplaces services))
+            (claudeCode [_] (:claude-code services))
             (claudeTag [_] (:claude-tag services))
             (telemetryDestinations [_] (:telemetry-destinations services))
             (webhooks [_] (:webhooks services))
