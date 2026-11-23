@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-11-22
+
+### Added
+
+- Wrap beta Claude Code managed settings: configuration, RBAC-group defaults,
+  and per-RBAC-group list/retrieve/set/delete operations.
+- New typed API error details, including image-dimensions-too-large, surface
+  through `:error-details`.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.12.0**.
+
 ## [0.51.0] - 2026-11-18
 
 ### Added

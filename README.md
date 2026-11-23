@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.51.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.52.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.51.0"]
+[net.clojars.savya/anthropic-clj "0.52.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -62,7 +62,7 @@ OpenTelemetry tracing is reachable through `:configure`, for example
 settings are reachable with the SDK's `(.withOptions client consumer)` on a
 built client. This library adds no OpenTelemetry dependency.
 
-Tracks [`com.anthropic/anthropic-java` 3.10.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.10.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 3.12.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.12.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -598,6 +598,9 @@ keyword enums.
   `create-`/`get-`/`list-`/`delete-claude-tag-bundle-target(s)`,
   `create-`/`get-`/`list-`/`update-`/`delete-claude-tag-slack-channel(s)`,
   `list-`/`get-`/`update-claude-tag-slack-workspace(s)`
+- Claude Code managed settings: `get-`/`update-claude-code-managed-settings-configuration`,
+  `get-`/`update-claude-code-rbac-group-default-managed-settings`, and
+  `list-`/`get-`/`set-`/`delete-claude-code-rbac-group-managed-settings`
 - Telemetry destinations: `create-`/`get-`/`list-`/`update-`/`delete-telemetry-destination(s)`,
   `test-telemetry-destination`, and `add-`/`list-`/`remove-telemetry-destination-workspace(s)`
 - Webhook endpoints: `create-`/`get-`/`list-`/`update-`/`delete-webhook-endpoint(s)` and
