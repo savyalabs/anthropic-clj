@@ -5,6 +5,19 @@ the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-25
+
+### Added
+
+- Wrap beta compliance review, external storage, and Google managed data-control
+  administration APIs.
+- Beta webhook mapping supports `:external-storage-failed` and
+  `:external-storage-recovered` events.
+
+### Changed
+
+- Bump `anthropic-java` and the Bedrock/Vertex artifacts to **3.14.0**.
+
 ## [0.52.0] - 2026-11-22
 
 ### Added

@@ -1429,6 +1429,143 @@
   (dynamic-list (stable-admin-service client service)
                 (->dynamic-params params (or opts {}))))
 
+;; ---- Compliance review ----------------------------------------------------
+
+(def ^:private compliance-review-params
+  "com.anthropic.models.beta.compliance.review.")
+(defn- beta-compliance-review-service [^AnthropicClient client service]
+  (reduce dynamic-call (dynamic-call (dynamic-call (.beta client) "compliance") "review") service))
+
+(defn list-compliance-review-cases
+  "List compliance review cases. Options include pagination, date filters, status, and `:betas`."
+  ([client] (list-compliance-review-cases client {}))
+  ([client opts]
+   (with-api-errors
+     (dynamic-list (beta-compliance-review-service client ["cases"])
+                   (->dynamic-params (str compliance-review-params "cases.CaseListParams") opts)))))
+
+(defn get-compliance-review-case
+  "Retrieve a compliance review case by id. Options: `:betas`."
+  ([client case-id] (get-compliance-review-case client case-id {}))
+  ([client case-id opts]
+   (when-not case-id (missing-key! :case-id))
+   (with-api-errors
+     (obj->clj (dynamic-call (beta-compliance-review-service client ["cases"]) "retrieve"
+                             (->dynamic-params (str compliance-review-params "cases.CaseRetrieveParams")
+                                               (assoc opts :case-id case-id)))))))
+
+(defn respond-to-compliance-review-case
+  "Record a determination for a compliance review case. `changes` requires `:determination`."
+  [client case-id changes]
+  (when-not case-id (missing-key! :case-id))
+  (with-api-errors
+    (obj->clj (dynamic-call (beta-compliance-review-service client ["cases"]) "respond"
+                            (->dynamic-params (str compliance-review-params "cases.CaseRespondParams")
+                                              (assoc changes :case-id case-id))))))
+
+(defn get-compliance-review-item
+  "Retrieve a compliance review item by id. Options: `:betas`."
+  ([client item-id] (get-compliance-review-item client item-id {}))
+  ([client item-id opts]
+   (when-not item-id (missing-key! :item-id))
+   (with-api-errors
+     (obj->clj (dynamic-call (beta-compliance-review-service client ["items"]) "retrieve"
+                             (->dynamic-params (str compliance-review-params "items.ItemRetrieveParams")
+                                               (assoc opts :item-id item-id)))))))
+
+(defn list-compliance-review-notices
+  "List compliance review notices. Options include pagination and `:betas`."
+  ([client] (list-compliance-review-notices client {}))
+  ([client opts]
+   (with-api-errors
+     (dynamic-list (beta-compliance-review-service client ["notices"])
+                   (->dynamic-params (str compliance-review-params "notices.NoticeListParams") opts)))))
+
+;; ---- External storage -----------------------------------------------------
+
+(def ^:private external-storage-params
+  "com.anthropic.models.beta.organization.externalstorage.")
+
+(defn create-external-storage [client changes]
+  (with-api-errors (admin-call client "externalStorage" "create"
+                               (str external-storage-params "ExternalStorageCreateParams") changes)))
+(defn get-external-storage
+  ([client external-storage-id] (get-external-storage client external-storage-id {}))
+  ([client external-storage-id opts]
+   (when-not external-storage-id (missing-key! :external-storage-id))
+   (with-api-errors (admin-call client "externalStorage" "retrieve"
+                                 (str external-storage-params "ExternalStorageRetrieveParams")
+                                 (assoc opts :external-storage-id external-storage-id)))))
+(defn update-external-storage [client external-storage-id changes]
+  (when-not external-storage-id (missing-key! :external-storage-id))
+  (with-api-errors (admin-call client "externalStorage" "update"
+                               (str external-storage-params "ExternalStorageUpdateParams")
+                               (assoc changes :external-storage-id external-storage-id))))
+(defn list-external-storage
+  ([client] (list-external-storage client {}))
+  ([client opts] (with-api-errors (admin-list client "externalStorage"
+                                              (str external-storage-params "ExternalStorageListParams") opts))))
+(defn delete-external-storage [client external-storage-id]
+  (when-not external-storage-id (missing-key! :external-storage-id))
+  (with-api-errors (admin-call client "externalStorage" "delete"
+                               (str external-storage-params "ExternalStorageDeleteParams")
+                               {:external-storage-id external-storage-id})))
+(defn activate-external-storage [client external-storage-id]
+  (when-not external-storage-id (missing-key! :external-storage-id))
+  (with-api-errors (admin-call client "externalStorage" "activate"
+                               (str external-storage-params "ExternalStorageActivateParams")
+                               {:external-storage-id external-storage-id})))
+
+;; ---- Google managed data controls ----------------------------------------
+
+(def ^:private google-project-data-control-params
+  "com.anthropic.models.beta.organization.providers.google.projects.datacontrols.")
+(defn get-google-managed-project-data-controls
+  ([client project-number] (get-google-managed-project-data-controls client project-number {}))
+  ([client project-number opts]
+   (when-not project-number (missing-key! :project-number))
+   (with-api-errors (admin-call client ["providers" "google" "projects" "dataControls"] "retrieve"
+                                 (str google-project-data-control-params "DataControlRetrieveParams")
+                                 (assoc opts :project-number project-number)))))
+(defn update-google-managed-project-data-controls [client project-number changes]
+  (when-not project-number (missing-key! :project-number))
+  (with-api-errors (admin-call client ["providers" "google" "projects" "dataControls"] "update"
+                               (str google-project-data-control-params "DataControlUpdateParams")
+                               (assoc changes :project-number project-number))))
+
+(def ^:private google-user-profile-data-control-params
+  "com.anthropic.models.beta.userprofiles.providers.google.datacontrols.")
+(defn- beta-user-profile-data-controls [^AnthropicClient client]
+  (reduce dynamic-call (dynamic-call (.beta client) "userProfiles")
+          ["providers" "google" "dataControls"]))
+(defn get-google-managed-user-profile-data-controls
+  ([client user-profile-id] (get-google-managed-user-profile-data-controls client user-profile-id {}))
+  ([client user-profile-id opts]
+   (when-not user-profile-id (missing-key! :user-profile-id))
+   (with-api-errors (obj->clj (dynamic-call (beta-user-profile-data-controls client) "retrieve"
+                                             (->dynamic-params (str google-user-profile-data-control-params "DataControlRetrieveParams")
+                                                               (assoc opts :user-profile-id user-profile-id)))))))
+(defn update-google-managed-user-profile-data-controls [client user-profile-id changes]
+  (when-not user-profile-id (missing-key! :user-profile-id))
+  (with-api-errors (obj->clj (dynamic-call (beta-user-profile-data-controls client) "update"
+                                            (->dynamic-params (str google-user-profile-data-control-params "DataControlUpdateParams")
+                                                              (assoc changes :user-profile-id user-profile-id))))))
+
+(defn get-beta-compliance-settings
+  "Retrieve beta compliance settings, including `:access-transparency` when set."
+  ([client] (get-beta-compliance-settings client {}))
+  ([client opts]
+   (with-api-errors
+     (obj->clj (dynamic-call (admin-service client "complianceSettings") "retrieve"
+                             (->dynamic-params "com.anthropic.models.beta.organization.compliancesettings.ComplianceSettingRetrieveParams" opts))))))
+
+(defn update-beta-compliance-settings
+  "Update beta compliance settings, including `:betas`."
+  [client changes]
+  (with-api-errors
+    (obj->clj (dynamic-call (admin-service client "complianceSettings") "update"
+                            (->dynamic-params "com.anthropic.models.beta.organization.compliancesettings.ComplianceSettingUpdateParams" changes)))))
+
 (defn get-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "retrieve" "com.anthropic.models.beta.organization.spendlimits.SpendLimitRetrieveParams" {:spend-limit-id id})))
 (defn list-spend-limits ([client] (list-spend-limits client {})) ([client opts] (with-api-errors (admin-list client "spendLimits" "com.anthropic.models.beta.organization.spendlimits.SpendLimitListParams" opts))))
 (defn delete-spend-limit [client id] (with-api-errors (admin-call client "spendLimits" "delete" "com.anthropic.models.beta.organization.spendlimits.SpendLimitDeleteParams" {:spend-limit-id id})))
