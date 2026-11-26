@@ -185,6 +185,8 @@
                                                BetaWebhookEnvironmentUpdatedEventData
                                                BetaWebhookExternalKeyFailedEventData
                                                BetaWebhookExternalKeyRecoveredEventData
+                                               BetaWebhookExternalStorageFailedEventData
+                                               BetaWebhookExternalStorageRecoveredEventData
                                                BetaWebhookEventData
                                                BetaWebhookMemoryStoreArchivedEventData
                                                BetaWebhookMemoryStoreCreatedEventData
@@ -4524,6 +4526,12 @@
    :data-id (.id d)
    :organization-id (.organizationId d)})
 
+(defn- webhook-external-storage-failed->map [^BetaWebhookExternalStorageFailedEventData d]
+  {:type :external-storage-failed :data-id (.id d) :organization-id (.organizationId d)})
+
+(defn- webhook-external-storage-recovered->map [^BetaWebhookExternalStorageRecoveredEventData d]
+  {:type :external-storage-recovered :data-id (.id d) :organization-id (.organizationId d)})
+
 (defn- webhook-data->map [^BetaWebhookEventData d]
   (cond
     (.isSessionCreated d) (webhook-session-created->map (.asSessionCreated d))
@@ -4580,6 +4588,10 @@
     (webhook-external-key-failed->map (.asExternalKeyFailed d))
     (.isExternalKeyRecovered d)
     (webhook-external-key-recovered->map (.asExternalKeyRecovered d))
+    (.isExternalStorageFailed d)
+    (webhook-external-storage-failed->map (.asExternalStorageFailed d))
+    (.isExternalStorageRecovered d)
+    (webhook-external-storage-recovered->map (.asExternalStorageRecovered d))
     :else {:type :unknown}))
 
 (defn- webhook-event->map [^UnwrapWebhookEvent r]

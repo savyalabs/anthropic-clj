@@ -197,7 +197,9 @@
                                                       :user-profile-enforcement-action-resolved
                                                       :user-profile-program-status-updated
                                                       :external-key-failed
-                                                      :external-key-recovered]}))]
+                                                      :external-key-recovered
+                                                      :external-storage-failed
+                                                      :external-storage-recovered]}))]
     (is (= "https://hooks.example.com/anthropic" (.url params)))
     (is (= "Enforcement" (present (.name params))))
     (is (= "Profile enforcement" (present (.description params))))
@@ -205,7 +207,9 @@
             WebhookCreateParams$EnabledEvent/USER_PROFILE_ENFORCEMENT_ACTION_RESOLVED
             WebhookCreateParams$EnabledEvent/USER_PROFILE_PROGRAM_STATUS_UPDATED
             WebhookCreateParams$EnabledEvent/EXTERNAL_KEY_FAILED
-            WebhookCreateParams$EnabledEvent/EXTERNAL_KEY_RECOVERED]
+            WebhookCreateParams$EnabledEvent/EXTERNAL_KEY_RECOVERED
+            WebhookCreateParams$EnabledEvent/EXTERNAL_STORAGE_FAILED
+            WebhookCreateParams$EnabledEvent/EXTERNAL_STORAGE_RECOVERED]
            (vec (.enabledEvents params))))
     (is (= "whep_1" (:id result)))
     (is (= "whsec_1" (:signing-secret result)))))

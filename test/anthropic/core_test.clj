@@ -2030,6 +2030,14 @@
       (is (= {:error-code "image_dimensions_too_large"
               :paths ["messages.0.content.0.source"]
               :max-side-length-pixels 8000}
+             (:error-details (ex-data ex))))))
+  (testing "new storage-in-use details preserve typed fields"
+    (let [ex (normalize
+              (service-ex com.anthropic.models.beta.BetaStorageInUseException
+                          {"type" "invalid_request_error"
+                           "details" {"error_code" "storage_in_use"
+                                      "storage_id" "est_1"}}))]
+      (is (= {:error-code "storage_in_use" :storage-id "est_1"}
              (:error-details (ex-data ex))))))))
 
 (deftest untyped-error-has-no-error-details

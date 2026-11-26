@@ -1434,6 +1434,25 @@
            (session-event->map
             (BetaManagedAgentsSessionEvent/ofSessionUsage event))))))
 
+(deftest beta-314-session-usage-long-token-fields-round-trip
+  (let [cache-creation (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsCacheCreationUsage/builder)
+                           (.ephemeral1hInputTokens (long 3))
+                           (.ephemeral5mInputTokens (long 4))
+                           (.build))
+        session (-> (com.anthropic.models.beta.sessions.BetaManagedAgentsSessionUsage/builder)
+                    (.inputTokens (long 11)) (.outputTokens (long 12))
+                    (.cacheReadInputTokens (long 13)) (.cacheCreation cache-creation) (.build))
+        thread (-> (com.anthropic.models.beta.sessions.threads.BetaManagedAgentsSessionThreadUsage/builder)
+                   (.inputTokens (long 21)) (.outputTokens (long 22))
+                   (.cacheReadInputTokens (long 23)) (.cacheCreation cache-creation) (.build))
+        usage->map (ns-resolve 'anthropic.beta 'usage->map)]
+    (is (= {:input-tokens 11 :output-tokens 12 :cache-read-input-tokens 13
+            :cache-creation {:ephemeral-1h-input-tokens 3 :ephemeral-5m-input-tokens 4}}
+           (usage->map session)))
+    (is (= {:input-tokens 21 :output-tokens 22 :cache-read-input-tokens 23
+            :cache-creation {:ephemeral-1h-input-tokens 3 :ephemeral-5m-input-tokens 4}}
+           (usage->map thread)))))
+
 (deftest session-event-params
   (let [^BetaManagedAgentsEventParams user (->session-event
                                             {:type :user-message
@@ -3128,6 +3147,29 @@
             :id "evt_budget" :created-at "2026-07-04T00:00Z"
             :event-type "event"}
            (webhook-event->map event)))))
+
+(deftest webhook-external-storage-response-mapping
+  (let [event->map (private-fn 'webhook-event->map)
+        event (fn [data]
+                (event->map
+                 (-> (UnwrapWebhookEvent/builder)
+                     (.id "evt_1")
+                     (.createdAt (java.time.OffsetDateTime/parse "2026-11-25T00:00:00Z"))
+                     (.data data)
+                     (.type (JsonValue/from "event"))
+                     (.build))))]
+    (is (= {:type :external-storage-failed :data-id "est_1" :organization-id "org_1"}
+           (select-keys (event (BetaWebhookEventData/ofExternalStorageFailed
+                                (-> (com.anthropic.models.beta.webhooks.BetaWebhookExternalStorageFailedEventData/builder)
+                                    (.id "est_1") (.organizationId "org_1")
+                                    (.type (JsonValue/from "external_storage.failed")) .build)))
+                        [:type :data-id :organization-id :workspace-id])))
+    (is (= {:type :external-storage-recovered :data-id "est_1" :organization-id "org_1"}
+           (select-keys (event (BetaWebhookEventData/ofExternalStorageRecovered
+                                (-> (com.anthropic.models.beta.webhooks.BetaWebhookExternalStorageRecoveredEventData/builder)
+                                    (.id "est_1") (.organizationId "org_1")
+                                    (.type (JsonValue/from "external_storage.recovered")) .build)))
+                        [:type :data-id :organization-id :workspace-id])))))
 
 (deftest webhook-environment-and-memory-store-response-mapping
   (let [event-map

@@ -32,13 +32,13 @@ jar. It does not assert parity.
 tools.deps (`deps.edn`):
 
 ```clojure
-net.clojars.savya/anthropic-clj {:mvn/version "0.52.0"}
+net.clojars.savya/anthropic-clj {:mvn/version "0.53.0"}
 ```
 
 Leiningen (`project.clj`):
 
 ```clojure
-[net.clojars.savya/anthropic-clj "0.52.0"]
+[net.clojars.savya/anthropic-clj "0.53.0"]
 ```
 
 Supported Clojure versions: 1.10, 1.11, and 1.12.
@@ -62,7 +62,7 @@ OpenTelemetry tracing is reachable through `:configure`, for example
 settings are reachable with the SDK's `(.withOptions client consumer)` on a
 built client. This library adds no OpenTelemetry dependency.
 
-Tracks [`com.anthropic/anthropic-java` 3.12.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.12.0) - see `CHANGELOG.md` for the bump history.
+Tracks [`com.anthropic/anthropic-java` 3.14.0](https://github.com/anthropics/anthropic-sdk-java/releases/tag/v3.14.0) - see `CHANGELOG.md` for the bump history.
 
 ## Usage
 
@@ -601,6 +601,10 @@ keyword enums.
 - Claude Code managed settings: `get-`/`update-claude-code-managed-settings-configuration`,
   `get-`/`update-claude-code-rbac-group-default-managed-settings`, and
   `list-`/`get-`/`set-`/`delete-claude-code-rbac-group-managed-settings`
+- Compliance review: `list-`/`get-`/`respond-to-compliance-review-case(s)`,
+  `get-compliance-review-item`, and `list-compliance-review-notices`
+- External storage: `create-`/`get-`/`update-`/`list-`/`delete-`/`activate-external-storage`
+- Google managed data controls: project and user-profile `get-`/`update-` wrappers
 - Telemetry destinations: `create-`/`get-`/`list-`/`update-`/`delete-telemetry-destination(s)`,
   `test-telemetry-destination`, and `add-`/`list-`/`remove-telemetry-destination-workspace(s)`
 - Webhook endpoints: `create-`/`get-`/`list-`/`update-`/`delete-webhook-endpoint(s)` and
